@@ -792,3 +792,137 @@ public class BoundedHashSet<T> {
 - 래치는 이벤트를 기다리기 위한 동기화 클래스이고, 배리어는 다른 스레드를 기다리기 위한 동기화 클래스 
 - 스레드는 각자가 배리어 포인트에 다다르면 await 메소를 호출하며, 이는 모든 스레드가 배리어 도달할 때까지 대기한다.
 
+## 5.6 효율적이고 확장성 있는 결과 캐시 구현
+- 이전에 처리했던 작업의 결과를 재사용할 수 있다면, 메모리를 조금 더 사용하기는 하지만 대기시간을 크게 줄이면서 처리량을 늘리 수 있다.
+- Computable 인터페이스는 A라는 입력값과 V라는 결과 값에 대한 메소드를 정의하였다. 
+```java
+public interface Computable<A, V> {
+    V compute(A arg) throws InterruptedException;
+}
+```
+- (1) HashMap 과 동기화 기능을 사용해 구현한 cache
+  - compute 메소드를 전체 동기화를 하였기에 동시에 여러 스레드가 compute 를 호출하지 못한다. 
+```java
+public class Memoizer1<A,V> implements Computable<A,V> {
+
+    @GuardedBy("this")
+    private final Map<A, V> cache = new HashMap<>();
+    private final Computable<A,V> c;
+
+    public Memoizer1(Computable<A, V> c) {
+        this.c = c;
+    }
+
+    @Override
+    public synchronized V compute(A arg) throws InterruptedException {
+        V result = cache.get(arg);
+        if (result == null) {
+            result = c.compute(arg);
+            cache.put(arg, result);
+        }
+        return result;
+    }
+}
+```
+- (2) ConcurrentHashMap 을 사용하여 스레드 안정성을 확보하여 다른 동기화를 사용하지 않는다. 
+  - 두 개이상의 스레드가 동일한 값에 대한 연산을 동시에 요청하면, 같은 결과를 2번 입력하게 되어 효율성이 떨어진다.
+```java
+public class Memoizer2<A,V> implements Computable<A,V> {
+
+    @GuardedBy("this")
+    private final Map<A, V> cache = new ConcurrentHashMap<>();
+    private final Computable<A,V> c;
+
+    public Memoizer2(Computable<A, V> c) {
+        this.c = c;
+    }
+
+    @Override
+    public V compute(A arg) throws InterruptedException {
+        V result = cache.get(arg);
+        if (result == null) {
+            result = c.compute(arg);
+            cache.put(arg, result);
+        }
+        return result;
+    }
+}
+```
+- (3) ConcurrentHashMap + Future 를 활용하여 2번 연산되는 부분을 제거한다. 
+- Map 에 결과를 추가할 때 단일 연산이 아닌 복합 연산을 사용하기 때문이며, 락을 사용해서는 단일 연산으로 구설할 수가 없다. (putIfAbsent)
+```java
+public class Memoizer3<A,V> implements Computable<A,V> {
+
+    @GuardedBy("this")
+    private final Map<A, Future<V>> cache = new ConcurrentHashMap<>();
+    private final Computable<A,V> c;
+
+    public Memoizer3(Computable<A, V> c) {
+        this.c = c;
+    }
+
+    @Override
+    public V compute(A arg) throws InterruptedException, ExecutionException {
+        Future<V> future = cache.get(arg);
+
+        if (future == null) {
+          Callable<V> eval = () -> c.compute(arg);
+          FutureTask<V> ft = new FutureTask<>(eval);
+          future = ft;
+          cache.put(arg, future);
+          ft.run();
+        }
+        return future.get();
+    }
+}
+```
+- (4) putIfAbsent 라는 단일 연산 메소드를 사용해 결과를 저장한다.
+```java
+public class Memoizer4<A,V> implements Computable<A,V> {
+
+    @GuardedBy("this")
+    private final Map<A, Future<V>> cache = new ConcurrentHashMap<>();
+    private final Computable<A,V> c;
+
+    public Memoizer4(Computable<A, V> c) {
+        this.c = c;
+    }
+
+    @Override
+    public V compute(A arg) throws InterruptedException, ExecutionException {
+
+        while (true) {
+            Future<V> future = cache.get(arg);
+            if (future == null) {
+                Callable<V> eval = () -> c.compute(arg);
+                FutureTask<V> ft = new FutureTask<>(eval);
+                future = cache.putIfAbsent(arg, ft);
+                if (future == null) {
+                    future = ft;
+                    ft.run();
+                }
+            }
+            try {
+                return future.get();
+            } catch (CancellationException e) {
+                cache.remove(arg);
+            }
+        }
+    }
+}
+```
+
+
+# 1부요약 
+- 병렬성과 관 관련된 모든 문제점은 변경 가능한 변수에 접근하려는 시도를 적절하게 조율하는 것으로 해결할 수 있다. 
+- 변경 가능성이 낮으면 스레드 안정성 확보하기가 쉽다. 
+- 변경 가능한 값이 아닌 변수는 모두 final 로 선언하라
+- 불변 객체는 항상 그 자체로 스레드 안전하다.
+- 캡슐화하면 복잡도를 손쉽게 제어할 수 있다. 
+- 변경 가능한 객체는 항상 락으로 막아줘야 한다. 
+- 불변 조건 내부에 들어가는 모든 변수는 같은 락으로 막아줘야 한다. 
+- 복합 연산을 처리하는 동안에는 항상 락을 확보하고 있어야 한다. 
+- 여러 스레드에서 변경 가능한 변수의 값을 사용하도록 되어 있으면서 적절한 동기화 기법이 적용되지 않는 프로그램은 올바른 결과를 내놓지 못한다. 
+- 동기화할 필요가 없는 부분에 대해서는 일부러 머리를 써서 고민할 필요가 없다.
+- 설계 단계부터 스레드 안정성을 염두에 두고 있어야 한다. 아니면 작성된 클래스가 스레드 안전하지 않다고 문서로 남기자
+- 프로그램 내부의 동기화 정책에 대한 문서를 남겨야 한다. 
