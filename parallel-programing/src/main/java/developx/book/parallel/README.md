@@ -536,3 +536,36 @@ public class ImprovedList<T> implements List<T> {
 ## 4.5 동기화 정책 문서화 하기 
 - 구현한 클래스가 어느 수준까지 스레드 안정성을 보장하는지에 대한 충분히 문서를 작성해야 한다. 
 - 동기화 기법이나 정책을 잘 정리해두면 유지보수 팀이 원활하게 관리할 수 있다. 
+
+<br/>
+
+# 5 구성 단위
+- 병렬 프로그램밍 과정에서 유용하게 사용할 수 있는 도구를 살펴본다. 
+- 병렬 프로그래밍 작성할 때 사용하기 좋은 몇 가지 디자인 패턴
+
+## 5.1 동기화된 컬렉션 클래스 
+> 동기화되어 있는 컬렉션 클래스 (Vector, Hashtable)는 public 으로 선언된 모든 메소드를 클래스 내부에 캡슐화해 한 스레드만 사용할 수 있도록 제어한다.
+
+### 5.1.1 동기화된 컬렉션 클래스의 문제점 
+- 동기화된 컬렉션 클래스는 스레드 안정성을 확보하고 있지만, 여러 개의 연산을 묶어 하나의 단일 연산처럼 사용할 때 주의해야 한다.
+```java
+import java.util.Vector;
+public void test(Vector vector){
+  for (int i = 0; i < vector.size(); i++) {
+      // vector.size(), vector.get() 2개의 작업이 동기화 되지 않아 
+      // ArrayIndexOutOfBoundsException 이 발생할 있는 코드 
+    doSomething(vector.get(i));
+  }
+}
+```
+
+### 5.1.2 Iterator, ConcurrentModificationException
+- Iterator 하는 도중 다른 스레드에서 데이터 변경이 일어나면 ConcurrentModificationException 이 발생한다. 
+- clone 메소드를 통해 복사본을 만들어 반복문을 수행하는 방법 존재 (clone 비용 발생)
+
+### 5.1.3 숨겨진 Iterator
+- toString, hashCode, equal 메소드들은 내부적으로 Iterator 을 사용한다. 
+- containsAll, removeAll, retainAll 등에서도 Iterator 을 사용한다.
+
+## 5.2 병렬 컬렉션 
+- 
