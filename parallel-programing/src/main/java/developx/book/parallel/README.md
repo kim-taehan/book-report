@@ -335,4 +335,116 @@ public class PersonSet {
 - 자바 모니터 패턴을 따르는 객체는 변경가능한 데이터를 모두 객체 내부에 숨긴 다음 객체의 암묵적인 락으로 데이터에 대한 동시 접근을 막는다.
 - 자바에 들어있는 Vector, Hashtable 등의 여러 가지 라이브러리 클래스에서도 사용되고 있다. 
 
-### 4.2.2 
+### 4.2.2 예제: 차량 위치 추적
+- MutablePoint 클래스는 스레드 안전하지는 않지만 차량 추적 클래스는 스레드 안정성을 확보
+- 정보를 얻고 싶은 클라이언트 프로그램에게 복사본을 만들어 제공한다. 
+- synchronized 키워드 지정된 메소드에서 복사본을 만들기 때문에 그동안 락이 걸리기에 성능 이슈가 존재한다.
+- [모니터 기반의 차량 추적 프로그램](vehicle%2Fv1%2FMonitorVehicleTracker.java)
+```java
+@ThreadSafe
+public class MonitorVehicleTracker {
+
+    @GuardedBy("this")
+    private final Map<String, MutablePoint> locations;
+
+    public MonitorVehicleTracker (Map<String, MutablePoint> locations){
+            this.locations = deepCopy(locations);
+    }
+
+    public synchronized Map<String, MutablePoint> getLocations(){
+        return deepCopy(this.locations);
+    }
+
+    public synchronized MutablePoint getLocation(String id) {
+        MutablePoint mutablePoint = locations.get(id);
+        return mutablePoint == null ? null : new MutablePoint(mutablePoint);
+    }
+
+    public synchronized void setLocation(String id, int x, int y) {
+        MutablePoint mutablePoint = locations.get(id);
+        if (mutablePoint == null) {
+            throw new IllegalArgumentException("no such id");
+        }
+        mutablePoint.x = x;
+        mutablePoint.y = y;
+    }
+
+    private Map<String, MutablePoint> deepCopy(Map<String, MutablePoint> locations) {
+        Map<String, MutablePoint> result = new HashMap<>();
+        for (String id : locations.keySet()) {
+            result.put(id, new MutablePoint(locations.get(id)));
+        }
+        return Collections.unmodifiableMap(result);
+    }
+
+}
+```
+- [변경 가능한 MutailPoint](vehicle%2Fv1%2FMutablePoint.java)
+```java
+@ThreadSafe
+public class MutablePoint {
+
+    public int x, y;
+
+    public MutablePoint(){
+        x=0;
+        y=0;
+    }
+
+    public MutablePoint(MutablePoint point) {
+        this.x = point.x;
+        this.y = point.y;
+    }
+}
+```
+
+## 4.3 스레드 안정성 위임 
+- 대부분의 객체가 둘 이상의 객체를 조합해 사용하는 합성 객첵이다. 
+- 스레드 안정성이 없는 객체를 조합해 만들면서 스레드 안정성을 확보하고자 한다면 자바 모니터 패턴을 유용하게 사용할 수 있다. 
+
+### 4.3.1 예제: 위임 기법을 활용한 차량 추적
+- Point 클래스는 불변이기 때문에 스레드 안전하다. 
+- 불변의 값을 얼마든지 외부에 공객 할 수 있으므로, 인스턴스를 복사해 줄 필요는 없다.
+- getLocations 메서드에서는 실시간으로 변경되는 차량위치가 반영되는 객체가 넘어간다.
+[값을 변경할 수 없는 Point 객체](vehicle%2Fv2%2FPoint.java)
+```java
+@Immutable
+public class Point {
+    public final int x, y;
+    public Point(int x, int y) {
+        this.x = x;
+        this.y = y;
+    }
+}
+```
+[스레드 안정성을 ConcurrentHashMap 클래스에 위임한 추적 프로그램](vehicle%2Fv2%2FDelegatingVehicleTracker.java)
+```java
+@ThreadSafe
+public class DelegatingVehicleTracker {
+
+    private final ConcurrentMap<String, Point> locations;
+    private final Map<String, Point> unmodifiableMap;
+
+    public DelegatingVehicleTracker(Map<String, Point> points) {
+        this.locations = new ConcurrentHashMap<>(points);
+        this.unmodifiableMap = Collections.unmodifiableMap(locations);
+    }
+
+    public Map<String, Point> getLocations() {
+        return unmodifiableMap;
+    }
+
+    public Point getLocation(String id) {
+        return locations.get(id);
+    }
+
+    public void setLocation(String id, int x, int y) {
+        if (locations.replace(id, new Point(x, y)) == null) {
+            throw new IllegalArgumentException("no such id");
+        }
+    }
+}
+```
+
+### 4.3.2 독립 상태 변수
+- 
