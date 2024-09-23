@@ -568,4 +568,108 @@ public void test(Vector vector){
 - containsAll, removeAll, retainAll 등에서도 Iterator 을 사용한다.
 
 ## 5.2 병렬 컬렉션 
-- 
+- 기존에 사용하던 동기화 컬렉션 클래스를 병렬 컬렉션으로 교체하는 것만으로도 별다른 위험 요소 없이 전체적인 성능을 상당히 끌어 올릴 수 있다. (ConcurrentHashMap, CopyOnWriteArrayList)
+- ConcurrentLinkedQueue 는 일반적인 FIFO 방식 큐이고, PriorityQueue 는 특정한 우선순위에 따라 Queue 에 쌓여 있는 항목이 추출되는 순서가 변경된다. 
+
+### 5.2.1 ConcurrentHashMap
+- 락 스트라이핑이라는 세밀한 동기화 방법을 사용해 여러 스레드에서 공유하는 상태에 잘 대응한다. 
+- Iterator 에서 ConcurrentModificationException 을 발생하지 않는다. 미약한 일관성 전략을 취한다. 
+- size, isEmpty 메소드는 추정값을 내려준다. (여러 스레드 동작시 그럴 수도 있다)
+
+### 5.2.2 Map 기반의 또 다른 단일 연산
+- ConcurrentHashMap 에서는 `put-if-absent`, `remove-if-equal`, `replace-if-equal` 연산 값이 복합 연산을 단일 연산으로 만들어 났다
+
+### 5.2.3 CopyOnWriteArrayList
+- CopyOnWriteArrayList 클래스는 동기화된 List 클래스보다 병렬성을 훨씬 높이고자 만들어졌다. 
+- Iterator 불러다 사용할때 락을 걸거나 List 를 복제할 필요가 없다. 
+- 데이터가 변경될 때마다 복사본을 만들어 내기 때문에 변경 작업보다 조회 작업이 많을 때 효율적이다.
+
+### 5.3 블록킹 큐와 프로듀서-컨슈머 패턴
+> 블로킹 큐는 애플리케이션 안정적으로 동작하도록 만들고자 할 때, 요긴하게 사용할 수 있는 도구 이다. 
+> 처리할 수 있는 양보다 훨씬 만은 작업이 생겨 부하가 걸리는 상황에서 작업량을 조절해 애플리케이션이 안정적으로 동작하도록 유도할 수 있다. 
+- put은 값을 추가할떄 공간이 생길때까지 대기, take 는 추출할 데이터가 있을 때까지 대기
+- offer 은 공간이 없는 경우 애러발생, pull 은 추출할 데이터가 없으면 null 반환
+
+### 5.3.1 예제: 데스크탑 검색
+- [데스크탑 검색 생산자](desktop%2FFileCrawler.java)
+```java
+public class FileCrawler implements Runnable {
+
+    private final BlockingQueue<File> fileQueue;
+    private final FileFilter fileFilter;
+    private final File root;
+
+    public FileCrawler(BlockingQueue<File> fileQueue, FileFilter fileFilter, File root) {
+        this.fileQueue = fileQueue;
+        this.fileFilter = fileFilter;
+        this.root = root;
+    }
+
+    @Override
+    public void run() {
+        try {
+            crawl(root);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private void crawl(File root) throws InterruptedException {
+        File[] entries = root.listFiles();
+        if (entries != null) {
+            for (File entry : entries) {
+                if (entry.isDirectory()) {
+                    crawl(entry);
+                } else if (!alreadyIndexed(entry)) {
+                    fileQueue.put(entry);
+                }
+            }
+        }
+    }
+    private boolean alreadyIndexed(File entry) {
+        return fileQueue.contains(entry);
+    }
+}
+
+```
+- [데스크탑 검색 소비자](desktop%2FIndexer.java)
+```java
+public class Indexer implements Runnable {
+
+    private final BlockingQueue<File> fileQueue;
+
+    public Indexer(BlockingQueue<File> fileQueue) {
+        this.fileQueue = fileQueue;
+    }
+
+    @Override
+    public void run() {
+        try {
+            while (true) {
+                indexFile(fileQueue.take());
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void indexFile(File take) {
+        System.out.println("read file = " + take.getAbsoluteFile());
+    }
+}
+```
+
+### 5.3.2 직렬 스레드 한정 
+- 객체에 대한 소유권을 이전하는 방식으로 프로듀서가 만든 객체를 컨슈머가 소유권을 갖게 되면 프로듀서는 객체에 대한 소유권을 잃어버린다.
+- 객체 풀은 직렬 스레드 한정 기법을 잘 사용한 예이다.
+
+### 5.3.3 덱, 작업 가로 체기
+- BlockingDeque 는 BlockingQueue 를 상속받은 인터페이스로 앞과 뒤 어느쪽에도 객체를 삽입하거나 제거할 수 있는 Queue이다.
+- 일반적인 방법과 다르게 가로 채기에서는 컨슈머마다 덱을 가지고 있고, 자신의 덱에 들어 있는 모두 처리하면, 다른 컨슈머 덱에 맨 뒤에 추가된 작업을 가로챌 수 있다.
+
+## 5.4 블로킹 메소드, 인터럽터블 메소드
+> 스레드는 여러가지 원인에 의해 블록 당하거나, 멈춰질 수 있다. 스레드가 블록되면 (BLOCKED, WAITING, TIMED_WAITING) 상태가 된다. 
+> 외부 신호에 의해 스레드 상태가 다시 RUNNABLE 상태로 변경되면서 시스템 스케줄러에 의해 CPU를 사용할 수 있다.
+- 스레드를 사용하면 InterruptedException 이 발생할 수 있고 그에 대처할 수 있는 방법을 마련해둬야 한다. 
+  - InterruptedException 전달: InterruptedException 을 그대로 호출한 메소드에 넘겨버리는 방법
+  - 인터럽트를 무시하고 복구: InterruptedException을 catch 한 다음 interrupt 메소드를 호출해 알린다.
