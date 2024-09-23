@@ -673,3 +673,122 @@ public class Indexer implements Runnable {
 - 스레드를 사용하면 InterruptedException 이 발생할 수 있고 그에 대처할 수 있는 방법을 마련해둬야 한다. 
   - InterruptedException 전달: InterruptedException 을 그대로 호출한 메소드에 넘겨버리는 방법
   - 인터럽트를 무시하고 복구: InterruptedException을 catch 한 다음 interrupt 메소드를 호출해 알린다.
+
+## 5.5 동기화 클래스 
+- 상태 정보를 사용해 스레드간의 작업 흐름을 조절할 수 있도록 만들어진 모든 클래스를 동기화 클래스라고 한다. 
+- BlockingQueue, 세마포아, 배리어, 래치 등이 존재 
+
+### 5.5.1 래치 
+- 래치는 스스로가 터미널상태에 이를 때까지의 스레드가 동작하는 과정을 늦출 수 있도록 해주는 동기화 클래스이다.
+- 래치는 터미널 상태에 다다르면 관문이 열리고 모든 스레드가 통과하며, 한번 열리면 다시 닫힐 수 는 없다.
+- 의존성을 갖고 있는 다른 서비스가 시작하기 전에는 특정 서비스가 실행되지 않도록 막아야 하는 경우에 사용
+
+```java
+import java.util.concurrent.CountDownLatch;
+
+public class TestHarness {
+  public long timeTasks(int nThreads, final Runnable task) {
+    final CountDownLatch startGate = new CountDownLatch(1);
+    final CountDownLatch endGate = new CountDownLatch(nThreads);
+
+    for (int i = 0; i < nThreads; i++) {
+      Thread t = new Thread() {
+        @Override
+        public void run() {
+          try {
+            startGate.await();
+            try {
+              task.run();
+            } finally {
+              endGate.countDown();
+            }
+          } catch (InterruptedException ignored) {
+              
+          }
+        }
+      };
+      t.start();
+    }
+    
+    startGate.countDown();
+    endGate.await();
+  }
+}
+```
+
+### 5.5.2 FutureTask
+> FutureTask 는 Executor 프레임웍에서 비동기적인 작업을 실행하고자 할 때 사용되며, 기타 시간이 많이 필요한 모든 작업이 있을때 실제 결과가 필요한 시점 이전에 미리 작업을 실행시켜두는 용도로 사용한다.
+
+```java
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+
+public class PreLoader {
+  private final FutureTask<ProductInfo> future = new FutureTask<>(new Callable<ProductInfo>() {
+    @Override
+    public ProductInfo call() throws Exception {
+      return loadProductInfo();
+    }
+  });
+
+  private final Thread thread = new Thread(future);
+
+  public void start() {
+    thread.start();
+  }
+
+  public ProductInfo get() {
+    try {
+      return future.get();
+    } catch (ExecutionException e) {
+      // 생략
+    }
+  }
+}
+```
+
+### 5.5.3 세마포어 
+- 특정 자원이나 특정 연산을 동시에 사용하거나 호출할 수 있는 스레드의 수를 제한하고자 할 떄 사용한다. 
+- acquire 메소드는 남는 퍼밋이 생길때까지 대기한다. (인터럽트나 타임아웃 제외)
+- release 메소드느 확보했던 퍼밋을 반납하는 기능을 제공한다.
+- 퍼밋은 세마포어 생성시 정의되는 수로 퍼밋만큼 스레드를 동작시킬 수 있다.
+```java
+public class BoundedHashSet<T> {
+
+    private final Set<T> set;
+    private final Semaphore sem;
+
+    public BoundedHashSet(int bound) {
+        this.set = Collections.synchronizedSet(new HashSet<>());
+        this.sem = new Semaphore(bound);
+    }
+
+    public boolean add(T o) throws InterruptedException {
+        sem.acquire();
+        boolean wasAdded = false;
+
+        try{
+            wasAdded = set.add(o);
+            return wasAdded;
+        }
+        finally {
+            if (!wasAdded) {
+                sem.release();
+            }
+        }
+    }
+
+    public boolean remove(Object o) {
+        boolean remove = set.remove(o);
+        if (remove) {
+            sem.release();
+        }
+        return remove;
+    }
+}
+```
+### 5.5.4 배리어 
+- 래치는 이벤트를 기다리기 위한 동기화 클래스이고, 배리어는 다른 스레드를 기다리기 위한 동기화 클래스 
+- 스레드는 각자가 배리어 포인트에 다다르면 await 메소를 호출하며, 이는 모든 스레드가 배리어 도달할 때까지 대기한다.
+
