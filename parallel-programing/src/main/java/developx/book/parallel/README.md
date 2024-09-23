@@ -460,3 +460,79 @@ public class DelegatingVehicleTracker {
 > 상태 변수가 스레드 안전하고, 클래스 내부에서 상태 변수의 값에 대한 의존성을 갖고 있지 않고,
 > 상태 변수에 대한 어떤 연산을 수행하더랃도 잘못된 상태에 이를 가능성이 없다면, 해당변수는 외부에 공개해도 안전하다.
 
+### 4.3.5 예제: 차량 추적 프로그램의 상태를 외부에 공개
+- 외부에서 호출하는 프로그램은 차량을 추가, 삭제 할 수 없지만 내부에 들어 있는 SafePoint 를 통해 차량의 위치는 변경할 수 있다.
+- [값 변경이 가능하고 스레드 안정성도 확보한 SafePoint클래스](vehicle%2Fv3%2FSafePoint.java)
+- [내부 상태를 안전하게 공개하는 차량 추적 프로그램](vehicle%2Fv3%2FPublishVehicleTracker.java)
+
+## 4.4 스레드 안전하게 구현된 클래스에 기능 추가
+- 자바의 기본 라이브러리 중 Vector 의 경우 스레드 안전하게 contains, add 가 구현되어 있다. 
+- 하지만 2개의 메소드를 복합적으로 사용하는 경우 스레드 안전하지 않다. 
+```java
+import net.jcip.annotations.ThreadSafe;
+
+import java.util.Vector;
+
+@ThreadSafe
+public class BetterVector<E> extends Vector<E> {
+  public synchronized boolean putIfAbsent(E item) {
+    boolean absent = !contains(item);
+    if (absent) {
+        add(item);
+    }
+    return absent;
+  }
+}
+```
+
+### 4.4.1 호출하는 측의 동기화
+- 클래스를 상속받지 않고도 클래스에 원하는 기능을 추가할 수 있는 세 번째 방법은 도우미 클래스를 따로 구현하는 방법이다.
+- 특정 클래스 내부에서 사용하는 락을 전혀 관계없는 제3의 클래스에서 갖다 쓰기 때문에 위험한 방법
+```java
+import net.jcip.annotations.ThreadSafe;
+
+import java.util.ArrayList;
+import java.util.Collections;
+
+@ThreadSafe
+public class ListHelper<E> {
+  public List<E> list = Collections.synchronizedList(new ArrayList<>());
+
+  public boolean putIfAbsent(E x) {
+    synchronized (list) {
+      boolean absent = !contains(item);
+      if (absent) {
+        add(item);
+      }
+      return absent;
+    }
+  }
+}
+```
+
+
+### 4.4.2 클래스 재구성 
+- 기존 클래스에 새로운 단일 연산을 추가하고자 할 때 좀더 안전한 방법은 재구성이다. 
+- ImprovedList 클래스에 들어 있는 List 클래스가 외부로 공개되지 않는 한 스레드 안정성 확보
+```java
+@ThreadSafe
+public class ImprovedList<T> implements List<T> {
+  private final List<T> list;
+  
+  public ImprovedList(List<T> list){
+      this.list = list;
+  }
+
+  public synchronizedboolean putIfAbsent(E x) {
+      boolean absent = !contains(item);
+      if (absent) {
+        add(item);
+      }
+      return absent;
+  }
+}
+```
+
+## 4.5 동기화 정책 문서화 하기 
+- 구현한 클래스가 어느 수준까지 스레드 안정성을 보장하는지에 대한 충분히 문서를 작성해야 한다. 
+- 동기화 기법이나 정책을 잘 정리해두면 유지보수 팀이 원활하게 관리할 수 있다. 
