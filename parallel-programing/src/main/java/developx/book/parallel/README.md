@@ -1164,3 +1164,78 @@ public class CompletionServiceRender {
 - 자바에서는 스레드가 작업을 실행하고 있을 때 강제로 멈추도록 하는 방법이 없다. 대신 인터럽트라는 방법을 통해 스레드에게 요청을 할 수 있다. 
 
 ## 7.1 작업 중단 
+- 실행 중인 작업을 취소하는 요구사항은 여러 가지 경우에 나타난다. 
+  - 사용자가 취소하기를 요청하는 경우
+  - 시간이 제한된 작업
+  - 애플리케이션 이벤트
+  - 오류
+  - 애플리케이션 종료
+- volatile 변수를 사용해 취소 상태를 확인
+- PrimeGenerator 클래스는 가장 기본적인 취소 정책을 사용하고 있다. 외부 프로그램이 cancel 메소드를 호출할 수 있고, PrimeGenerator 는 소수를 찾을 때마다 취소여부를 확인한다.
+```java
+@ThreadSafe
+public class PrimeGenerator implements Runnable {
+    @GuardedBy("this")
+    private final List<BigInteger> primes = new ArrayList<>();
+    private volatile boolean cancelled;
+  
+    @Override
+    public void run() {
+        BigInteger p = BigInteger.ONE;
+        while (!cancelled) {
+            p = p.nextProbablePrime();
+            synchronized (this){
+                primes.add(p);
+            }
+        }
+    }
+    public void cancel() {cancelled = true;}
+}
+```
+
+### 7.1.1 인터럽트
+> 스레드에 거는 인터럽트는 특정 스레드에게 적당한 상황이고 작업을 멈추려는 의지가 이는 상황이라면, 현재 실행 주이던 작업을 멈추고 다른 일을 할 수 있도록 해야 한다고 신호를 보내는 것이다.
+- 모든 스레드는 불린 값으로 인터럽트 상태를 갖고 있다. 
+- interrupt 메소드는 해당 스레드에게 인터럽트를 거는 역할
+- isInterrupted 메소드는 해당 스레드에 인터럽트가 걸려있는 알려준다. 
+- interrupted 메소드는 인터럽트 상태를 해제하고, 해제하기 이전의 값이 무엇이었는지를 알려준다. (중요)
+- 특정 스레드의 interrupt 메소드를 호출한다 해도 해당 스레드가 처리하던 작업을 멈추지는 않는다. 단지 해당 스레드에게 인터럼트 요청이 있었다는 메시지를 전달
+- 멈춰있는 스레드에 인터럽트가 발생되는 InterruptException 이 발생한다. 
+```java
+@ThreadSafe
+public class PrimeGenerator implements Runnable {
+    @GuardedBy("this")
+    private final List<BigInteger> primes = new ArrayList<>();
+  
+    @Override
+    public void run() {
+        try {
+            BigInteger p = BigInteger.ONE;
+            while (Thread.currentThread().isInterrupted()) {
+                p = p.nextProbablePrime();
+                synchronized (this) {
+                    primes.add(p);
+                }
+            }
+        } catch (InterruptedException e){
+            Thread.currentThread().interrupt();
+            // or 
+            throw new RuntimeException(e);
+        }
+    }
+    public void cancel() { interrupt();}
+}
+```
+
+### 7.1.2 인터럽트 정책
+- 인터럽트 요청이 들어 왔을 때, 해당 스레드가 인터럽트를 어떻게 처리해야 하는지에 대한 지침이다.
+- 가장 범용적인 인터럽트 정책은 스레드 수준이나 서비스 수준에서 작업 중단 기능을 제공하는 것이다. 
+- 인터럽트가 발생했을 때, 실해되고 있던 작업이 모든 것을 포기하고 작업을 중단해야만 하는 것은 아니다. 
+
+### 7.1.3 인터럽트에 대한 대응
+- InterruptedException 이 발생했을 때 처리할 수 있는 실질 적인 방법에는 두 가지가 있다.  
+  - 발생한 예외를 호출 스택의 상위 메소드를 전달한다.
+  - 호출 스택에 상단에 위치한 메소드 직접 처리할 수 있도록 인터럽트 상태를 유지한다.
+- catch 블록에서 InterruptedException 잡아내게 되면 해당 스레드는 인터럽트 상태가 해제 되기에 아무 행동을 취하지 않으면 안된다. (최소한 인터럽트 상태로라도 변경해야 한다.)
+
+### 7.1.4 예제: 시간 지정 실행 
