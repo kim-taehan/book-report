@@ -17,6 +17,7 @@ public abstract class WebCrawler {
     private final Set<URL> urlsToCrawl = new HashSet<>();
 
     public synchronized void start(){
+
         this.executor = new TrackingExecutor(Executors.newCachedThreadPool());
         for (URL url : urlsToCrawl) {
             submitCrawlTask(url);
@@ -66,6 +67,7 @@ public abstract class WebCrawler {
             return url;
         }
     }
+
 
 
 }
