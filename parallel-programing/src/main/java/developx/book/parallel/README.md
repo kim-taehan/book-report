@@ -1551,4 +1551,12 @@ public void run(){
   }
 }
 ```
+ 
+### 7.3.1 정의되지 않은 예외처리 (UncaughtExceptionHandler)
+- UncaughtExceptionHandler 라는 기능을 사용하면 처리하지 못한 예외 상황으로 인해 특정 스레드가 종료되는 시점을 정확히 알 수 있다.
+- RejectedExecutionException 는 ExecutorService 에게 요청이 거절되었을 때 발생하는 애러이다.
+- 스레드 풀의 작업 스레드를 대상으로 UncaughtExceptionHandler 을 설정 하려면 ThreadPoolExecutor 를 생성할때 ThreadFactory 클래스를 별도로 넘겨주면 된다.  
+- UncaughtExceptionHandler 가 호출되도록 하기위해서는 반드시 execute 메소드를 통해서 작업을 실행해야 한다.   
 
+## 7.4 JVM 종료 
+-                                                                                        
