@@ -1,7 +1,6 @@
 package developx.book.parallel.logging;
 
 import java.io.PrintWriter;
-import java.io.Writer;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -36,4 +35,6 @@ public class LogService {
         } catch (RejectedExecutionException ignored) {
         }
     }
+
+
 }

@@ -1496,4 +1496,59 @@ public class MailSender {
 > shutdownNow 메소드를 사용해서 ExecutorService 를 강제로 종료시키는 경우 현재 실행중인 스레드의 작업에서는 인터럽트를 요청하고 
 > 등록되었지만 실행은 되지 않았던 스레드의 실행상태로 가지않고, 모든 작업을 리턴을 해준다.
 - 실행은 되었지만, 아직 완료되지 않은 작업이 어떤 것인지를 알 수있는 방법은 없다. 
-- 
+- TrackingExecutor 클래스는 Executor 를 종료할 때 작업이 진행 중이던 스레드가 어떤 것인지 알아내는 방법을 보여준다.
+- TrackingExecutor는 시작은 됐지만 정상적으로 종료되지 않은 작업이 어떤 것인지를 정확하게 알 수 있다. 
+- [종료된 이후에도 실행이 중단된 작업 어떤 것인지 알려주는 ExecutorService](tracking%2FTrackingExecutor.java)
+```java
+public class TrackingExecutor extends AbstractExecutorService {
+
+    private final ExecutorService exec = Executors.newSingleThreadExecutor();
+    private final Set<Runnable> taskCancelledAtShutdown = Collections.synchronizedSet(new HashSet<>());
+
+    public List<Runnable> getCancelledTasks() {
+        if (!exec.isTerminated()) {
+            throw new IllegalStateException();
+        }
+        return new ArrayList<>(taskCancelledAtShutdown);
+    }
+
+    @Override
+    public void execute(Runnable runnable) {
+        exec.execute(() -> {
+            try {
+                runnable.run();
+            } finally {
+                if (isShutdown() && Thread.currentThread().isInterrupted()) {
+                    taskCancelledAtShutdown.add(runnable);
+                }
+            }
+        });
+    }
+}
+```
+- WebCrawler 클래스는 중단되는 시점에 작업 중이던 내용을 알아둬야 할 필요가 있는 프로그램이다. 
+- 아직 시작하지 않는 작업과 실행 도중에 중단된 작업이 어떤 것인지 찾아내서 기록해 둔다.
+- [중단된 작업을 나중에 사용할 수 있도록 보관하는 모습](tracking%2FWebCrawler.java)
+
+## 7.3 비정상적인 스레드 종료 상황 처리
+- 많은 수의 스레드를 사용하는 병렬 애플리케이션에서 예외가 발생했을 때에는 단일 스레드 애플리케이션처럼 단순한 상태로 넘어가지 않는다. 
+- 스레드 풀에서 사용하는 작업용 스레드는 항상 남이 정의하고 그래서 알 수 없는 작업을 실행하는데 시간을 보낸다. 
+- 따라서 이런 작업 처리 스레드는 자신이 실행하는 남의 작업이 제대로 동작하지 않을 수 있다고 가정하고 대응해야 한다. 
+  - 실행할 작업을 try-catch 구문 내부에서 실행해 예상치 못한 예외사항에 대응
+  - try-finally 구문을 사용해 스레드가 피치 못할 사정으로 종료되는 경우에도 외부에 종료된다는 사실을 알려 대응할 수 있게 해야한다.
+```java
+public void run(){
+    Throwable thrown = null;
+  try {
+    while (!isInerrupted()) {
+      runTask(getTaskFromWorkQueue());
+    }
+  } catch (Throwable throwable) {
+    thrown = throwable;
+  } finally {
+      // 스레드 풀에게 스스로 종료되는 것을 알려준다
+    threadExited(this, thrown);
+  }
+}
+```
+
