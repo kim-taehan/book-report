@@ -5,6 +5,7 @@ import net.jcip.annotations.GuardedBy;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 
 public class Memoizer2<A,V> implements Computable<A,V> {
 
@@ -17,7 +18,7 @@ public class Memoizer2<A,V> implements Computable<A,V> {
     }
 
     @Override
-    public V compute(A arg) throws InterruptedException {
+    public V compute(A arg) throws InterruptedException, ExecutionException {
         V result = cache.get(arg);
         if (result == null) {
             result = c.compute(arg);

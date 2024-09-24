@@ -914,7 +914,7 @@ public class Memoizer4<A,V> implements Computable<A,V> {
 
 
 # 1부요약 
-- 병렬성과 관 관련된 모든 문제점은 변경 가능한 변수에 접근하려는 시도를 적절하게 조율하는 것으로 해결할 수 있다. 
+- 병렬성과 관련된 모든 문제점은 변경 가능한 변수에 접근하려는 시도를 적절하게 조율하는 것으로 해결할 수 있다. 
 - 변경 가능성이 낮으면 스레드 안정성 확보하기가 쉽다. 
 - 변경 가능한 값이 아닌 변수는 모두 final 로 선언하라
 - 불변 객체는 항상 그 자체로 스레드 안전하다.
@@ -926,3 +926,241 @@ public class Memoizer4<A,V> implements Computable<A,V> {
 - 동기화할 필요가 없는 부분에 대해서는 일부러 머리를 써서 고민할 필요가 없다.
 - 설계 단계부터 스레드 안정성을 염두에 두고 있어야 한다. 아니면 작성된 클래스가 스레드 안전하지 않다고 문서로 남기자
 - 프로그램 내부의 동기화 정책에 대한 문서를 남겨야 한다. 
+
+<br/>
+
+# 6 작업 실행
+- 작업이란 추상적이면서 명확하게 구분된 업무의 단위를 말한다. 
+- 대부분의 병렬 애플리케이션은 작업을 실해하는 구조가 효율적으로 구성되어 있다.
+
+## 6.1 스레드에서 작업 실행
+- 작업은 다른 작업의 상태, 결과, 부수효과 등에 영향을 받지 않아야 하는 독립성을 갖춰져 있어야 병렬성을 보장할 수 있다. 
+- 각 작업은 애플리케이션의 전체적인 업무 내용 가운데 작은 부분을 담당해야 한다. 
+
+### 6.1.1 작업을 순차적으로 실행 
+- 작업을 실행하는 가장 간단한 방법은 단일 스레드에서 작업 목록을 순차적으로 실행하는 방법이다.
+- 서버 프로그램은 약간은 연산과 I/O 작업이 대부분을 차지 하는데 순차적으로 실행하면, 1건씩 처리하며 다른 요청은 대기할 수 밖에 없게 된다.
+
+### 6.1.2 작업마다 스레드를 직접 생성 
+- 반응 속도를 높일 수 있는 방법 가운데 하나는 요청이 올때마다 새로운 스레드를 하나씩 만들어 실행시키는 방법
+- 작업을 처리하는 기능이 메인 스레드에서 떨어져 나왔기에 두 개 이상의 요청을 받을 수 있어 처리속도를 향상 시킬 수 있다.
+
+### 6.1.3 스레드를 많이 생성할 떄의 문제점 
+- 스레드 라이프 사이클 문제 : 스레드를 생성하고 제거하는 작업에도 자원이 소비된다. 
+- 자원낭비: 프로세서보다 많은 수의 스레드가 만들어져 동작 중이라면, 대부분의 스레드가 대기 상태가 된디ㅏ. 
+- 안정성 문제: 모든 시스템에는 생성할 수 있는 스레드 개수가 제한되어 있다. 만약 이를 넘게 되면 OutOfMemoryError 가 발생한다.
+
+## 6.2 Executor 프레임웍
+- java.util.concurrent 패키지에 보면 Executor 프레임웍의 일부분으로 유연하게 사용할 수 있는 스레드 풀이 만들어져 있다.
+- Executor 는 프로듀서-컨슈머 패턴에 기반하고 있으며, 작업을 생성해 등록하는 프로듀서가 되고 실제로 실해하는 스레드가 컨슈머가 된다. 
+```java
+public interface Executor {
+  void execute(Runnable runnable);
+}
+```
+
+### 6.1.1 예제: Executor 를 사용한 웹서버
+- 요청 처리 작업을 등록하는 부분과 실제로 처리 기능을 실행하는 부분이 Executor 를 사이에 두고 분리되어 있다.
+[Executor 를 사용한 웹서버](executor%2FTaskExecutionWebServer.java)
+```java
+public class TaskExecutionWebServer {
+
+    private static final int THREAD_COUNT = 100;
+    private static final Executor exec = Executors.newFixedThreadPool(THREAD_COUNT);
+
+    public static void main(String[] args) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(80);
+        while (true) {
+            Socket accept = serverSocket.accept();
+            Runnable runnable = () -> handleRequest(accept);
+            exec.execute(runnable);
+        }
+    }
+
+    private static void handleRequest(Socket accept) {
+        //.. do something
+    }
+}
+```
+
+### 6.2.2 실행 정책 
+- 작업을 어느 스레드에서 실행
+- 작업을 어떤 순서로 실행
+- 동시에 몇 개의 작업을 병렬로 실행
+- 최대 몇 개까지의 작업이 큐에서 실행을 대기
+- 부하가 많이 걸려 작업을 거절해야 경우 어떤 작업을 취소하고 어떻게 알려야 할 것인가?
+- 작업을 실행하기 직전, 직후에 어떤 동작이 있어야 하는가?
+
+### 6.2.3 스레드 풀
+- 작업을 처리할 수 있는 동일한 형태의 스레드를 풀의 형태로 관리하는 기능 
+- 매번 스레드를 생성하는 대신 재사용하기 때문에 스레드 생성 비용을 줄어 반응속도가 향상된다. 
+- 스레드 풀의 크기를 적절히 조절해두면 하드웨어 프로세서가 쉬지 않고 동작하게 할 수 있다. 
+
+### 6.2.4 Executor 동작 주기
+- JVM 은 모든 스레드가 종료되기 전에는 종료하지 않기 때문에 Executor 를 제대로 종료시키지 않으면 JVM 자체가 종료되지 않는다.
+- ExecutorService 가 가지고 있는 동작 주기는 실행중(running), 종료중(shutting down), 종료(terminated) 3가지 상태가 있다. 
+- shutdown : 새로운 작업을 등록받지 않으며, 이전에 등록되어 있는 작업까지는 모두 끝마칠 수 있다.
+- shutdownNow: 현재 진행중인 작업에는 interrupt 을 걸고, 이전에 등록된 작업은 실행되지 않는다.
+- reject execution handler 를 통해 종료가 시작된 이후 요청에 대해 처리할 수 있다.
+- awaitTermination: 메소드를 주기적으로 호출해 종료여부를 확인할 수 있다.
+
+### 6.2.5 지연 작업, 주기적 작업
+- Timer 클래스는 사용하면 특정 시간 이후에 원하는 작업을 실행하는 지연작업이나 주기적인 작업을 실행할 수 있다. 
+- Timer 클래스 보다 ScheduledThreadPoolExecutor 를 사용하는 것을 권장한다. 
+
+## 6.3 병렬로 처리할 만한 작업
+- 브라우져 애플리케이션에서 웹 페이지를 그려내는 기능 
+
+### 6.3.1 예제: 순차적 페이지 렌더링 
+- 가장 간단한 방법은 HTML 문서의 내용을 순차적으로 그려가는 방법이다. 
+- 이미지를 다운로드 받는 작업은 I/O 작업이며, 대기하는 시간동안 CPU가 하는 일은 별로 없다. 따라서 이런 방식은 CPU의 능력을 제대로 활용하지 못한다.
+```java
+public class SingleThreadRender {
+
+  void renderPage(CharSequence source) {
+    renderText(source);
+
+    List<Image> images = new ArrayList<>();
+
+    for (ImageInfo imageInfo : scanForImageInfo(source)) {
+      images.add(imageInfo.download());
+    }
+    for (Image image : images) {
+      renderImage(image);
+    }
+  }
+  private List<ImageInfo> scanForImageInfo(CharSequence source) {
+    return new ArrayList<>();
+  }
+
+  private void renderText(CharSequence source) {
+    // ...
+  }
+  private void renderImage(Image image) {
+    // ...
+  }
+}
+```
+
+### 6.3.2 결과가 나올 때까지 대기: Callable 과 Future
+- Runnable 보다는 Callable 를 사용하자. 결과 값을 돌려받을 수 있으며, Exception 도 발생시킬 수 있다.
+- Future 는 특정 작업이 정상적으로 완료되었는지 아니면 취소되었는지에 대한 정보를 확인할 수 있도록 만들어진 클래스이다.
+- Future 의 get method 는 작업이 완료되지 않았을때는 대기하고 완료된 상태면 결과나 exception 을 반환한다. (ExecutionException, CancellationException)
+
+### 6.3.3 예제: Future를 사용해 페이지 렌더링
+- Callable과 Future 인터페이스를 사용하면 여러 스레드가 서로 상대방을 살펴가며 동작하는 논리 구조를 쉽게 설계할 수 있다.
+- 프로그램 내부에서 진행되는 작업을 둘로 나눠보자. 첫번째는 텍스트를 이미지로 그려내는 작업이고, 두번째는 이미지 파일을 다운로드 받는 작업이다.
+- 하지만 이 프로그램에서는 이미지를 모두 받을 때까지 HTML 에 이미지를 그리지 못한다.
+```java
+public class FutureRender {
+    private final ExecutorService executorService = Executors.newFixedThreadPool(10);
+    
+    void renderPage(CharSequence source) {
+        final List<ImageInfo> imageInfos = scanForImageInfo(source);
+        Callable<List<Image>> task = () -> imageInfos.stream().map(imageInfo -> imageInfo.download()).toList();
+        Future<List<Image>> future = executorService.submit(task);
+        renderText(source);
+
+        try {
+            List<Image> imageData = future.get();
+            for (Image image : imageData) {
+                renderImage(image);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+### 6.3.4 다양한 형태의 작업을 병렬로 처리하는 경우의 단점 
+> 프로그램이 해야 할 일을 작은 작업으로 쪼개 실행할 때 실제적인 성능상의 이점을 얻으려면, 프로그램이 하는 일을 대량의 동일한 작업으로 재정의해 병렬로 처리할 수 있어야 한다.
+- 여러 개의 작업 스레드가 하나의 작업을 나눠 실행시킬 때는 작업 스레드간에 필요한 내용을 조율하는 데 일부 자원을 소모
+
+### 6.3.5 CompletionService: Executor 와 BlockingQueue 연합
+- CompletionService 는 Executor 와 BlockingQueue 의 기능을 하나로 모은 인터페이스이다. 
+- 필요한 Callable 작업을 등록해 실핼시킬 수 있고, take 나 poll 과 같은 큐 메소드를 사용해 작업이 완료되는 순간 작업의 Future 인스턴스를 받아올 수 있다.
+
+### 6.3.6 CompletionService 를 활용한 페이지 렌더링
+- 각각의 이미지 파일을 다운받는 작업을 생성하고, Executor 를 활용해 다운로드 작업을 실행한다.
+- completionService.take() 를 통해 이미지 다운로드가 되면 바로 그림을 그려넣게 된다.
+```java
+public class CompletionServiceRender {
+    private final ExecutorService executor;
+
+    public CompletionServiceRender(ExecutorService executor) {
+        this.executor = executor;
+    }
+    void renderPage(CharSequence source) {
+
+        final List<ImageInfo> imageInfos = scanForImageInfo(source);
+        CompletionService<Image> completionService = new ExecutorCompletionService<>(executor);
+        for (ImageInfo imageInfo : imageInfos) {
+            completionService.submit(imageInfo::download);
+        }
+
+        renderText(source);
+
+        try {
+            for (int i = 0; i < imageInfos.size(); i++) {
+                Future<Image> take = completionService.take();
+                renderImage(take.get());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+### 6.3.7 작업 실행 시간 제한
+- 실행 중인 작업이 일정한 시간이 지난 이후에도 종료되지 않아 결과를 받지 못하는 경우에 대비에 실행 시간을 제한해야 되는 일이 있다.
+- Future.get 메소드에서 파라메터를 추가해 이런 시간 제한을 걸수 있으며, 시간이 초과된 경우 TimeoutException 이 발생한다. 
+- TimeoutException 이 발생하면 해당 작업을 취소할 수 있으며, 취소하는 즉시 더 이상 시스템 자원을 잡아먹지 않고 멈추게 된다.
+
+
+### 6.3.8 예제: 여행 예약 포털
+-[제한된 시간 안에 여행 관련 입찰 정보를 가져오도록 요청하는 코드](travel%2FTravelCostCalculator.java)
+```java
+public class CompletionServiceRender {
+    private final ExecutorService executor;
+
+    public CompletionServiceRender(ExecutorService executor) {
+        this.executor = executor;
+    }
+    void renderPage(CharSequence source) {
+
+        final List<ImageInfo> imageInfos = scanForImageInfo(source);
+        CompletionService<Image> completionService = new ExecutorCompletionService<>(executor);
+        for (ImageInfo imageInfo : imageInfos) {
+            completionService.submit(imageInfo::download);
+        }
+
+        renderText(source);
+
+        try {
+            for (int i = 0; i < imageInfos.size(); i++) {
+                Future<Image> take = completionService.take();
+                renderImage(take.get());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+
+<br/>
+
+# 7 중단 및 종료 
+- 자바에서는 스레드가 작업을 실행하고 있을 때 강제로 멈추도록 하는 방법이 없다. 대신 인터럽트라는 방법을 통해 스레드에게 요청을 할 수 있다. 
+
+## 7.1 작업 중단 
