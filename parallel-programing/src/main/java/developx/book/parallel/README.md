@@ -1239,3 +1239,261 @@ public class PrimeGenerator implements Runnable {
 - catch 블록에서 InterruptedException 잡아내게 되면 해당 스레드는 인터럽트 상태가 해제 되기에 아무 행동을 취하지 않으면 안된다. (최소한 인터럽트 상태로라도 변경해야 한다.)
 
 ### 7.1.4 예제: 시간 지정 실행 
+[작업 실행 전용 스레드에 인터럽트 거는 방법](timerun%2FSimpleTimeRun.java)
+
+### 7.1.5 Future 를 사용해 작업 중단
+- Future 에서는 cancel 메소드가 있는데 작업을 취소하는 메서드 이다. 
+  - false : 실행전인 작업만 실행하지 않는다.
+  - true : 실행중인 작업에도 인터럽트를 발생시킨다.
+```java
+public class FutureTimeRun {
+
+    private static final ExecutorService tskExec = Executors.newFixedThreadPool(1);
+    private static final ScheduledExecutorService cancelExec = Executors.newScheduledThreadPool(1);
+
+    public static void timeRun(Runnable r, long timeout, TimeUnit timeUnit) throws InterruptedException {
+        Future<?> task = tskExec.submit(r);
+        try {
+            task.get(timeout, timeUnit);
+        } catch (ExecutionException e) {
+            // finally 블록에서 작업 중단
+            throw new RuntimeException(e);
+        } catch (TimeoutException e) {
+            // 작업 내부에서 예외상황 발생 (예외를 다시 던진다.)
+            throw new RuntimeException(e);
+        } finally {
+            // 실행중이라면 인터럽트를 건다.
+            task.cancel(true);
+        }
+    }
+}
+```
+
+### 7.1.6 인터럽트에 응답하지 않는 블로킹 작업 다루기
+- 자바 라이브러리에 포함된 여러 블로킹 메소드는 대부분 인터럽트가 발생하는 즉시 멈추면서 InterruptedException 을 띄우도록 되어 있어서 작업중단 요청에 대응할 수 있다.
+- 인터럽트에 응답하지 않는 블로킹 작업
+  - java.io 패키지의 동기적 소켓 I/O
+  - java.nio 패키지의 동기적 I/O
+  - Selector 를 사용한 비동기적 I/O
+  - 락 확보: 스레드가 암묵적인 락을 확보하기 위해 대기 상태있는 경우 
+- interrupt 메소드를 오바라이드해 인터럽트를 요청하는 표준적인 방법과 함께 추가적적으로 열려있는 소켓을 닫는다. 
+- [interrupt 메소드를 오바라이드해 인터럽트를 요청](timerun%2FReaderThread.java)
+```java
+public class ReaderThread extends Thread {
+
+    private final Socket socket;
+    private final InputStream in;
+
+    public ReaderThread(Socket socket) throws IOException {
+        this.socket = socket;
+        this.in = socket.getInputStream();
+    }
+
+    @Override
+    public void interrupt() {
+        try {
+            if (socket != null) {
+                socket.close();
+            }
+        } catch (IOException ignored) {
+        } finally {
+            super.interrupt();
+        }
+    }
+    @Override
+    public void run() {
+        try {
+            // 인터럽트에 응답하지 않는 블로킹 작업
+            in.read(null);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+### 7.1.7 newTaskFor 메소드로 비표준적인 중단 방법 처리 
+- 자바 6 버전부터는 ThreadPoolExecutor 클래스에 newTaskFor 라는 메소드를 통해서 표준을 따르지 않는 중단방법을 처리할 수 있게 되었다.
+- ThreadPoolExecutor 를 상속받은 CancellingExecutor 클래스를 생성하여 여기서 newTaskFor 재구현하여 인터럽트 작업을 할 수 있게 한다.
+```java
+public interface CancellableTask <T> extends Callable<T> {
+    void cancel();
+    RunnableFuture<T> newTask();
+}
+```
+```java
+
+public abstract class SocketUsingTask<T> implements CancellableTask<T> {
+
+    private Socket socket;
+
+    public synchronized void setSocket(Socket socket) {
+        this.socket = socket;
+    }
+    @Override
+    public void cancel() {
+        try {
+            if (socket != null) {
+                socket.close();
+            }
+        } catch (IOException ignored) {
+        }
+    }
+    @Override
+    public RunnableFuture<T> newTask() {
+        return new FutureTask<T>(this){
+            @Override
+            public boolean cancel(boolean mayInterruptIfRunning) {
+
+                try{
+                    SocketUsingTask.this.cancel();
+                } finally {
+                    return super.cancel(mayInterruptIfRunning);
+                }
+            }
+        };
+    }
+}
+```
+
+```java
+public class CancellingExecutor extends ThreadPoolExecutor {
+    public CancellingExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue) {
+        super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
+    }
+
+    @Override
+    protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
+        if (callable instanceof CancellableTask<T> cancellableTask) {
+            return cancellableTask.newTask();
+        } else {
+            return super.newTaskFor(callable);
+        }
+    }
+}
+```
+
+
+## 7.2 스레드 기반 서비스 중단 
+- 애플리케이션을 깔끔하게 종료시키려면 스레드 기반의 내부에 생성되어 있는 스레드를 안전하게 종료해야 한다. 
+- 그런데 스레드를 선점적인 방법으로 강제로 종료시킬 수는 없기 떄문에 스레드에게 알아서 종료해달라고 부탁해야 한다.
+- 스레드 기반 서비스를 생성한 메소드보다 생성된 스레드 기반 서비스가 오래 실행 될 수 있는 상황이라면, 스레드 기반 서비스에서 항상 종료시키는 방법을 제공해야 한다.
+
+### 7.2.1 예제: 로그 서비스
+- LogWriter 클래스에서는 로그 출력 기능을 독립적인 스레드로 구현하였다. 
+- BQ를 사용해 메시지를 출력 전담 스레드에 넘겨주며, 출력 전담 스레드는 큐에 쌓인 메시지 가져다 화면에 출력한다.
+- LogWriter 의 경우 인터럽트가 발생하였을 때, queue 에 쌓여 있던 메시지는 모두 잃어 버린다. 또한 Queue 가 가득차서 기다리고 있는 쓰레드는 영원히 대기하게 된다.
+```java
+// 종료 기능 이 구현되지 않은 프로듀서-컨슈머 패턴의 로그 서비스
+public class LogWriter {
+
+    private final BlockingQueue<String> queue;
+    private final LoggerThread logger;
+
+    public LogWriter(Writer writer) {
+        this.queue = new LinkedBlockingQueue<>(1000);
+        this.logger = new LoggerThread((PrintWriter) writer);
+    }
+    
+    public void start(){
+        logger.start();
+    }
+
+    public void log(String msg) throws InterruptedException {
+        queue.put(msg);
+    }
+
+    @RequiredArgsConstructor
+    private class LoggerThread extends Thread {
+        private final PrintWriter printWriter;
+        @Override
+        public void run() {
+            try {
+                while (true) {
+                    String take = queue.take();
+                    System.out.println(take);
+                    printWriter.println(take);
+
+                    printWriter.flush();
+                }
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            } finally {
+                printWriter.close();
+            }
+        }
+    }
+}
+```
+
+### 7.2.2 ExecutorService 종료 
+- ExecutorService 사용해서 우아하게 종료할 수있는 LogService class
+- [ExecutorService 를 활용한 로그 서비스](logging%2FLogService.java)
+```java
+public class LogService {
+    private final ExecutorService exec = Executors.newSingleThreadExecutor();
+    private final PrintWriter writer;
+    public LogService(PrintWriter printWriter) {
+        this.writer = printWriter;
+    }
+
+    public void stop() throws InterruptedException {
+        try {
+            exec.shutdown();
+            boolean stopResult = exec.awaitTermination(1, TimeUnit.SECONDS);
+        } finally {
+            writer.close();
+        }
+    }
+
+    public void log(String msg) {
+        try {
+            exec.execute(() -> {
+                writer.println(msg);
+            });
+        } catch (RejectedExecutionException ignored) {
+        }
+    }
+}
+```
+
+### 7.2.3 독약 (poison pill)
+- 특정 객체를 큐에 쌓도록 되어 있으면 이객체는 `이 객체를 받았다면, 종료해야 한다`라는 의미를 가지고 있다. 
+- FIFO 유형의 큐를 사용하는 경우 먼저 큐에 쌓인 객체를 다 처리해야 독약 객체를 만나 종료할 수 있다. 
+- 다만 많은 수의 프로듀서와 컨슈머를 사용하는 경우에 허술하게 보인다. 이 방법은 크기에 제한이 없는 큐를 사용시 효과적으로 동작한다.
+
+### 7.2.4 예제: 단번에 실행하는 서비스
+- checkMail 메소드는 여러 서버를 대상으로 새로 도착한 메일이 있는지를 병렬로 확인한다.
+- 먼저 메소드 내부에 Executor 인스턴스를 하나 생성하고, 각 서버별로 구별된 작업을 실행시킨다.
+```java
+public class MailSender {
+    
+    boolean checkMail(Set<String> hosts, long timeout) throws InterruptedException {
+      ExecutorService exec = Executors.newSingleThreadExecutor();
+      final AtomicBoolean hasNewMail = new AtomicBoolean(false);
+      try {
+          for (final String host : hosts) {
+              exec.execute(() -> {
+                  if (checkMail(host)) {
+                      hasNewMail.set(true);
+                  }
+              });
+          }
+      } finally {
+          exec.shutdown();
+          exec.awaitTermination(timeout, TimeUnit.SECONDS);
+      }
+      return hasNewMail.get();
+    }
+
+    private boolean checkMail(String host) {
+        return false;
+    }
+}
+```
+
+### 7.2.5 shutdownNow 메소드의 약점
+> shutdownNow 메소드를 사용해서 ExecutorService 를 강제로 종료시키는 경우 현재 실행중인 스레드의 작업에서는 인터럽트를 요청하고 
+> 등록되었지만 실행은 되지 않았던 스레드의 실행상태로 가지않고, 모든 작업을 리턴을 해준다.
+- 실행은 되었지만, 아직 완료되지 않은 작업이 어떤 것인지를 알 수있는 방법은 없다. 
+- 
