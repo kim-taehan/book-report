@@ -34,7 +34,6 @@ public class ConcurrentPuzzleSolver<P, M> {
         public SolverTask(P pos, M move, Node<P, M> prev) {
             super(pos, move, prev);
         }
-
         @Override
         public void run() {
             if (solution.isSet() || seen.putIfAbsent(pos, true) != null) {

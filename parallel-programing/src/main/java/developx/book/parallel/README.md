@@ -1733,5 +1733,112 @@ public <T> void parallelRecursive(Executors executors, List<Node<T>> nodes, Coll
 ```
 
 ### 8.5.1 예제: 퍼즐 프레임웍
-[puzzle](puzzle)
+- 병렬화 방법을 적용하기에 괜찮아 보이는 예제 가운데 하나는 바로 퍼즐을 푸는 프로그램이다. 
+- 퍼즐이라는 대상을 초기 위치, 목표 위치, 정상적인 이동 규칙 등의 세 가지로 추상화하고, 세 가지 개념을 묶어 퍼즐이라고 정의하자
+- (P는 위치, M은 이동방향을 나타내는 클래스이다.)
+```java
+public interface Puzzle<P, M> {
+    P initialPosition();
+    boolean isGoal(P position);
+    Set<M> legalMoves(P position);
+    P move(P position, M move);
+}
+```
+- Node 클래스는 이동 과정을 거쳐 도착한 특정 위치를 표현하며, 해당 위치로 오게 했던 이동 규칙과 직전 위치를 가리키는 Node에 대한 참조를 갖고 있다. 
+```java
+@Immutable
+@RequiredArgsConstructor
+public class Node <P, M>{
+    final P pos;
+    final M move;
+    final Node<P, M> prev;
 
+    List<M> asMoveList(){
+        LinkedList<M> solution = new LinkedList<>();
+        for (Node<P, M> n = this; n.move != null; n = n.prev) {
+            solution.add(0, n.move);
+        }
+        return solution;
+    }
+}
+```
+- ConcurrentPuzzleSolver 클래스는 병렬로 동작하면서 퍼즐을 해결하는 프로그램이다. 
+- Node 클래스를 상속받고 Runnable 인터페이스를 구현한 SolverTask 클래스에 run 메소드에서 병렬작업으로 처리한다.
+  - 현재 상태에서 이동할 수 있는 다음 위치를 모두 찾는 작업
+  - 가능한 모든 이동 위치 가운데 이미 가봤던 위치를 대상에서 제외
+  - 목표한 위치에 돌달했는지 를 확인하기 위한 연산작업
+  - 이동해야 할 대상 위치를 Executor 에게 넘겨주는 작업
+```java
+@RequiredArgsConstructor
+public class ConcurrentPuzzleSolver<P, M> {
+    private final Puzzle<P, M> puzzle;
+    private final ExecutorService exec;
+    private final ConcurrentMap<P, Boolean> seen;
+
+    final ValueLatch<Node<P, M>> solution =  new ValueLatch<>();
+
+    public List<M> solve() throws InterruptedException {
+        try {
+            P p = puzzle.initialPosition();
+            exec.execute(newTask(p, null, null));
+            // 최종 결과를 찾을 떄까지 대기
+            Node<P, M> solnNode = solution.getValue();
+            return (solnNode == null) ? null : solnNode.asMoveList();
+        } finally {
+            exec.shutdown();
+        }
+    }
+
+    protected Runnable newTask(P p, M m, Node<P, M> node) {
+        return new SolverTask(p, m, node);
+    }
+
+    class SolverTask extends Node<P, M> implements Runnable {
+        public SolverTask(P pos, M move, Node<P, M> prev) {
+            super(pos, move, prev);
+        }
+        @Override
+        public void run() {
+            if (solution.isSet() || seen.putIfAbsent(pos, true) != null) {
+                return;
+            }
+            if (puzzle.isGoal(pos)) {
+                solution.setValue(this);
+            }
+            else {
+                for (M m : puzzle.legalMoves(pos)) {
+                    exec.execute(newTask(puzzle.move(pos, m), m, this));
+                }
+            }
+        }
+    }
+}
+```
+
+
+<br/>
+
+# 9 GUI 애플리케이션
+- GUI 프로그램을 작성할 때는 항상 스레드 관련 문제가 발생하지 않도록 신경써야 한다. 
+
+## 9.1 GUI는 왜 단일 스레드로 동작하는가?
+- 멀티 스레드로 구현된 GUI 프레임웍은 대부분 경쟁 조건과 데드락등의 문제가 계속 발생한다.
+- GUI 프레임웍은 이벤트 처리용 전담 스레드를 만들고, 전감 스레드는 큐에 쌓여 있는 이벤트를 가져와 이벤트 처리 메소드를 호출해 기능을 동작시키는 단일 스레드 이벤트 큐 모델을 사용한다. 
+
+### 9.1.1 순차적 이벤트 처리 
+- GUI 이벤트를 처리하는 스레드는 단 하나밖에 없기 때문에 이벤트는 항상 순차적으로 실행된다. 
+- 작업을 순차적으로 처리하게 되면 특정 작업을 실행하는 데 시간이 오래 걸리는 경우 다른작업이 오래 기다려야 된다는 점이다. 
+- 이런 문제를 방지하기 위해 이벤트 스레드에서 실행되는 작업은 반드시 빨리 작업을 마치고 이벤트 스레드에 제어권을 바로 넘기도록 해야 한다. 
+
+
+### 9.1.2 스윙의 스레드 한정 
+- JButton, JTable 와 같은 스윙 컴포넌트와 TabelModel, TreeModel 등의 데이터 모델 객체는 이벤트 스레드 한정되도록 만들어져 있다. 
+- 스윙 이벤트 스레드는 이벤트 큐에 쌓여 있는 작업을 순차적으로 처리하는 단일 스레드 Executor 라고 볼수 있다. 
+
+## 9.2 짧게 실행되는 GUI 작업 
+- 이벤트 스레드에서 이벤트가 시작돼 애플리케이션에 만들어져 있는 리스너에게 전파된다. 
+- 짧은 시간 동안 실행되는 작업은 작업 전체가 이벤트 스레드 내부에서 실행돼도 큰 문제는 없지만, 오랜 시간 동안 실행되는 작업은 이벤트 스레드가 아닌 외부의 다른 스레드에서 실행되어야 한다. 
+
+## 9.3 장시간 실행되는 GUI 작업 
+- 시간이 오래 걸리는 작업을 이벤트 스레드와 달리 독립된 스레드에서 실행하도록 하면 작업 도중에 GUI 화면이 얼어버리지 않게 할 수 있다. 
+- 
