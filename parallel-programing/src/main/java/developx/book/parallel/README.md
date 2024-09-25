@@ -1612,6 +1612,126 @@ public void start(){
 - Executors 클래스에서 사용되는 팩토리 메소드도 ThreadPoolExecutor 를 사용해서 생성하고 있다.
 
 ### 8.3.1 스레드 생성과 제거
+- 풀의 코어 크기, 최대 크기, 스레드 유지 시간 등의 값을 통해 스레드가 생성과 제거되는 과장을 조절할 수 있다. 
+- 스레드풀은 처음부터 코어 크기만큼 스레드를 만들어 놓지 않는다. (preStartAllCoreThread 메소드를 통해 미리 만들수는 있다.)
+- Queue 사이즈 만큼에 대기가 쌓이기 전에는 스레드 사이즈가 증가되지 않는다.
+- 스레드 유지 시간이 지나도 코어 크기 이하로 사이즈가 줄지 않는다.
 
+### 8.3.2 큐에 쌓인 작업 관리 
+- 크기가 제한된 스레드 풀에서는 동시에 실행 될 수 있는 스레드의 개수가 제한되어 있다. 
+- 작업을 처리할 수 있는 능력보다 많은 양의 요청이 들어오면 처리하지 못한 요청이 큐에 계속해서 쌓인다.
+- 스레드 풀에서 작업을 쌓아둘 큐에 적용할 수 있는 전략
+  - 큐에 크기 제한을 두지 않는 방법
+  - 큐의 크기를 제한하는 방법
+  - 작업을 스레드에게 직접 넘겨주는 방법
+- 스레드 풀에서 실행할 작업이 서로 독립적인 경우에만 스레드의 개수나 작업 큐의 크기를 제한할 수 있다.
 
+### 8.3.3 집중 대응 정책 
+- 이미 맥스 core 만큼 스레드가 확장되어 있고, 크기가 제한된 큐에 작업 가득 차면 집중 대응 정책이 동작한다. (큐에 가득차고 난 후 들어온 요청에 대한 처리방법)
+- AbortPolicy: execute 메소드에서 RejectedExecutionException 을 리턴한다.
+- DiscardPolicy: 큐에 더 이상 작업을 쌓을 수 없다면 방금 추가 시키려고 했던 정책을 제거한다.
+- DiscardOldPolicy: 큐에 더 이상 작업을 쌓을 수 없다면 가장 오래되어 다음 번 실행될 예정이던 작업을 제거한다.
+- CallerRunsPolicy: 큐의 크기를 초과하는 작업을 프로듀서에게 직접 하라고 요청하는 방식으로 속도 조절 방법으로 사용된다.
+
+### 8.3.4 스레드 팩토리
+- 새로운 스레드는 항상 스레드 펙토리를 통해 생성한다.
+- 스레드 펙토리를 직접 작성해 사용해야 하는 경우 
+  - UncaughtExceptionHandler 를 직정 지정할 때
+  - ThreadGroup 지정
+  - 스레드 실행 우선순위 지정 (권장하지 않음)
+  - 데몬 상태를 지정 (권장하지 않음)
+  - 의미 있는 스레드 이름을 입력하고 싶은 경우 
+```java
+public class ThreadFactoryMain {
+    
+    private final ExecutorService executorService;
+
+    public ThreadFactoryMain( ) {
+        this.executorService = new ThreadPoolExecutor(
+                10,
+                10,
+                1000,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(1000),
+                new SimpleThreadFactory("의미있는 이름"),
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+    }
+
+    @RequiredArgsConstructor
+    static class SimpleThreadFactory implements ThreadFactory {
+        
+        private final String name;
+
+        @Override
+        public Thread newThread(Runnable r) {
+            Thread thread = new Thread(r, name);
+            thread.setUncaughtExceptionHandler((t, e) -> System.out.printf(e.getMessage()));
+            return thread;
+        }
+    }
+}
+```
+
+### 8.3.5 ThreadPoolExecutor 생성 이후 설정 변경
+- ThreadPoolExecutor 를 생성할 때 생성 메소드에 넘겨줬던 설정 값은 대부분 여러가 set 메소드를 사용해 변경할 수 있다. 
+- Executors 에 unconfigurableExecutorService 메소드를 통해 불변의 ThreadPoolExecutor 로 변경할 수 있다.
+```java
+public class ImmutableExecutor {
+    private final ExecutorService executorService;
+    public ImmutableExecutor() {
+        ThreadPoolExecutor executorService1 = new ThreadPoolExecutor(10, 10, 1000, TimeUnit.SECONDS, new SynchronousQueue<>());
+        this.executorService = Executors.unconfigurableExecutorService(executorService1);
+    }
+}
+```
+
+### 8.4 ThreadPoolExecutor 상속
+- ThreadPoolExecutor 은 애초에 상속받아 기능을 추가할 수 있도록 만들어졌다. 
+- beforeExecute, afterExecute, terminated 와 같은 훅도 제공하고 있으며, 이를 사용해 다양한 기능을 구현할 수 있다.
+- beforeExecute, afterExecute 메소드는 작업을 실행할 스레드의 내부에서 호출하도록 되어 있다.
+
+### 8.4.1 예제: 스레드 풀에 통계 확인 기능 추가 
+```java
+
+public class ExtendedThreadPoolExecutor extends ThreadPoolExecutor {
+    public ExtendedThreadPoolExecutor(int corePoolSize, int maximumPoolSize, long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue) {
+        super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
+    }
+
+    @Override
+    protected void beforeExecute(Thread t, Runnable r) {
+        super.beforeExecute(t, r);
+    }
+
+    @Override
+    protected void afterExecute(Runnable r, Throwable t) {
+        super.afterExecute(r, t);
+    }
+
+    @Override
+    protected void terminated() {
+        super.terminated();
+    }
+}
+```
+
+## 8.5 재귀 함수 병렬화
+> 특정 작업을 여러번 실행하는 반복문이 있을 때, 반복되는 각 작업이 서로 독립적이라면 병렬화해서 성능의 이점을 얻을 수 있다. 
+> 특히 반복문 내부의 작업을 갤별적인 작업으로 구분해 실해하느라 추가되는 약간한 부하가 부담되지 않을 만큼 적지 않은 시간이 걸리는 작업이라야 더 효과를 볼 수 있다.
+
+```java
+import java.util.Collection;
+import java.util.concurrent.Executors;
+
+public <T> void parallelRecursive(Executors executors, List<Node<T>> nodes, Collection<T> result){
+    for(final Node<T> n: nodes){
+        executors.execute(() -> result.add(n.compute()));
+    }
+  parallelRecursive(executors, n.getChildern(), result);
+}
+```
+
+### 8.5.1 예제: 퍼즐 프레임웍
+[puzzle](puzzle)
 
