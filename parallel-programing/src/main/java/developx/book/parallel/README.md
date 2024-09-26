@@ -1966,12 +1966,97 @@ public class LeftRightDeadlock {
 - TransferMoney 메소드는 데드락이 발생하는 부분이 없다고 생각할 수 있지만 멀티 스레드 환경에서는 데드락이 발생할 수 있다. 
 - transferMoney(myAccount, yourAccount, 1_000), transferMoney(yourAccount, myAccount, 1_000) 처러 동시 호출시 서로 락을 가진 데드락이 발생한다.
 ```java
+// 데드락이 발생할 수 있는 코드 
 public void transferMoney(Account fromAccount, Account toAccount, DollarAmount amount){
-  synchronized (fromAccount) {
-    synchronized (toAccount) {
-      fromAccount.debit(amount);
-      toAccount.credit(amount);
+    synchronized (fromAccount) {
+        synchronized (toAccount) {
+            fromAccount.debit(amount);
+            toAccount.credit(amount);
+        }
     }
-  }
 }
 ```
+- 락을 확보하는 순서를 프로그램 전반적으로 동일하게 적용해야 한다. 
+
+### 10.1.3 객체 간의 데드락
+> 락을 확보한 상태에서 에일리언 메소드를 호출한다면 가용성에 문제가 생길수 있다. 에어리언 메소드 내부에서 다른 락을 확보하려고 하거나,
+> 아니면 예상하지 못한 만큼 오랜 시간 동안 계속해서 실행되다면 호출하기 전에 확보했던 락이 필요한 다른 스레드가 계속해서 대기해야 하는 경우도 생길 수 있다.
+
+### 10.1.4 오픈호출
+- 락을 확보하지 않은 상태에서 메소드를 호출하는 것을 오픈 호출이라 하며, 락을 확보한 상태에서 메소드를 호출하는 것보다 훨씬 안정적이다.
+- 프로그램을 작성할 때 최대한 오픈 호출 방법을 사용하도록 한다.
+- 아래 예제는 메소드 전체에 락을 걸지 않고 일부에만 락을 걸러 에어리언 메소드를 오픈 호출하도록 한 예제이다.
+```java
+@ThreadSafe
+class Taxi {
+    @GuardedBy("this") private Point location, destination;
+    
+    private final Dispatcher dispatcher;
+    
+    public Taxi(Dispatcher dispatcher) { this.dispatcher = dispatcher; }
+    
+    public synchronized Point getLocation() {
+        return location;
+    } 
+    
+    public void setLocation(Point location) {
+        boolean reachedDestination = false;
+        synchronized (this) {
+            this.location = location;
+            reachedDestination = location.equal(destination);
+        }
+        if(reachedDestination){
+            dispatcher.notifyAvailable(this);
+        }
+    }
+}
+```
+
+```java
+import java.util.HashSet;
+
+@ThreadSafe
+class Dispatcher {
+    @GuardedBy("this")
+    private final Set<Taxi> taxis;
+    @GuardedBy("this")
+    private final Set<Taxi> availableTaxis;
+  
+    public Dispatcher() {
+        this.taxis = new HashSet<>();
+        availableTaxis = new HashSet<>();
+    }
+    
+    public synchronized void notifyAvailable(Taxi taxi){
+        availableTaxis.add(taxi);
+    }
+    
+    public Image getImage() {
+        Set<Taxi> copy;
+        synchronized (this) {
+            copy = new HashSet<>(taxis);
+        }
+        Image image = new Image();
+        for(Taxi t : copy) {
+            image.drawMarker(t.getLocation());
+        }
+        return image;
+    }
+}
+```
+
+### 10.1.5 리소스 데드락 
+- 필요한 자원을 사용하기 위해 대기하는 과정에도 데드락이 발생 할 수 있다. 
+- 예를 들어 2개의 데이터베이스 풀을 사용해되는 경우 락을 얻는 순서를 정의하지 않는 경우 데드락에 빠지게 된다. 
+- 단일 스레드로 동작하는 Executor 에서 현재 실행 중인 작업 또 다른 작업을 큐에 쌓고는 그 작업 끝날 때까지 대기하는 경우 데드락이 발생한다. 
+
+## 10.2 데드락 방지 및 원인 추적 
+- 가능하다면 한 번에 하나 이상의 락을 사용하지 않도록 프로그램 구성 
+- 여러 개의 락을 사용해야만 한다면 락을 사용하는 순서 역시 걸계 단계부터 고려해야 한다.
+
+### 10.2.1 락의 시간 제한 
+- synchronized 등의 암묵적이 락을 사용하는 대신 시간 제한이 있는 Lock 클래스를 사용할 수 있다. 
+- 특정 시간 동안 락을 확보하지 못한다면 오류를 발생시켜 데드락이 빠지는 현상을 막을 수 있다. 
+
+### 10.2.2 스레드 덤프를 활용한 데드락 분석 
+- 
