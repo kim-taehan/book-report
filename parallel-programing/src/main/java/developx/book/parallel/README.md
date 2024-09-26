@@ -1828,17 +1828,150 @@ public class ConcurrentPuzzleSolver<P, M> {
 ### 9.1.1 순차적 이벤트 처리 
 - GUI 이벤트를 처리하는 스레드는 단 하나밖에 없기 때문에 이벤트는 항상 순차적으로 실행된다. 
 - 작업을 순차적으로 처리하게 되면 특정 작업을 실행하는 데 시간이 오래 걸리는 경우 다른작업이 오래 기다려야 된다는 점이다. 
-- 이런 문제를 방지하기 위해 이벤트 스레드에서 실행되는 작업은 반드시 빨리 작업을 마치고 이벤트 스레드에 제어권을 바로 넘기도록 해야 한다. 
+- 이런 문제를 방지하기 위해 이벤트 스레드에서 실행되는 작업은 반드시 빨리 작업을 마치고 이벤트 스레드에 제어권을 바로 넘기도록 해야 한다.
+- 
+```java
+public class SwingUtilities {
+    
+    // 이벤트 처리 큐 (단일 스레드로 동작한다.)
+    private static final ExecutorService exec = Executors.newSingleThreadExecutor(new SwingThreadFactory());
 
+    private static volatile Thread swingThread;
 
+    private static class SwingThreadFactory implements ThreadFactory {
+        public Thread newThread(Runnable runnable) {
+            return new Thread(runnable);
+        }
+    }
+
+    public static boolean isEventDispatchThread() {
+        return Thread.currentThread() == swingThread;
+    }
+    
+    // 이벤트 스레드 큐에 이벤트를 추가한다.
+    public static void invokerLater(Runnable task) {
+        exec.execute(task);
+    }
+
+    public static void invokeAndWait(Runnable task) throws InterruptedException, InvocationTargetException {
+        try {
+            exec.submit(task).get();
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
 ### 9.1.2 스윙의 스레드 한정 
 - JButton, JTable 와 같은 스윙 컴포넌트와 TabelModel, TreeModel 등의 데이터 모델 객체는 이벤트 스레드 한정되도록 만들어져 있다. 
 - 스윙 이벤트 스레드는 이벤트 큐에 쌓여 있는 작업을 순차적으로 처리하는 단일 스레드 Executor 라고 볼수 있다. 
+```java
+public class GuiExecutor extends AbstractExecutorService {
 
+    @Getter
+    private static final GuiExecutor instance = new GuiExecutor();
+
+    @Override
+    public void execute(Runnable r) {
+        // 이벤트 요청한 스레드가 이벤트 스레드인 경우 직접 수행
+        if (SwingUtilities.isEventDispatchThread()) {
+            r.run();
+        }
+        else {
+            // 외부에서 요청온 경우 이벤트 스레드 큐에 입력
+            SwingUtilities.invokerLater(r);
+        }
+
+    }
+}
+```
 ## 9.2 짧게 실행되는 GUI 작업 
 - 이벤트 스레드에서 이벤트가 시작돼 애플리케이션에 만들어져 있는 리스너에게 전파된다. 
 - 짧은 시간 동안 실행되는 작업은 작업 전체가 이벤트 스레드 내부에서 실행돼도 큰 문제는 없지만, 오랜 시간 동안 실행되는 작업은 이벤트 스레드가 아닌 외부의 다른 스레드에서 실행되어야 한다. 
 
 ## 9.3 장시간 실행되는 GUI 작업 
 - 시간이 오래 걸리는 작업을 이벤트 스레드와 달리 독립된 스레드에서 실행하도록 하면 작업 도중에 GUI 화면이 얼어버리지 않게 할 수 있다. 
-- 
+```java
+public static void main(String[] args) {
+
+  ExecutorService backGroundExec = Executors.newCachedThreadPool();
+  JButton jButton = new JButton();
+  jButton.addActionListener(new ActionListener() {
+    @Override
+    public void actionPerformed(ActionEvent e) {
+      jButton.setEnabled(false);
+      backGroundExec.execute(() -> {
+        try{
+          doRunEvent();
+        } finally {
+          GuiExecutor.getInstance().execute(() -> {
+            jButton.setEnabled(true);
+          });
+        }
+      });
+    }
+  });
+}
+``` 
+
+### 9.3.1 작업 중단
+- Future 인터페이스의 cancel 메소드를 사용하여 수행중인 이벤트에 인터럽트를 걸어서 작업 중단을 요청할 수 있다. 
+- cancel(false) : 작업 진행대기중 작업만 작업 취소
+- cancel(true) : 작업 중인 스레드에게도 인터럽트를 요청 한다. 
+
+### 9.4.2 진행 상태 및 완료 알림 
+- FutureTask 클래스에 포함돼 있는 done 이라는 훅 메소드를 사용하면 작업이 끝났음을 알려주는 기능도 중단 기능처럼 구현할 수 있다. 
+
+
+## 9.4 데이터 공유 모델
+- TableModel, TreeModel 같은 데이터 모델 객체를 포하해 스윙의 화면 표시 객체는 이벤트 스레드에 제한되어 있다.
+
+
+<br/> 
+
+# 10 활동성을 최대로 높이기
+> 스레드 안정성과 활동성사이에는 트레이드 오프가 존재한다. 데드락과 같이 활동성에 문제가 되는 상황에는 어떤 것이 있는지 살펴보고 방지하는 방법을 알아본다.
+
+## 10.1 데드락 
+- 서로 다른 트랜잭션에 필요한 락을 확하고 풀어주지 않는 상태를 데드락 상태라고 한다.
+- JVM 에서는 데드락 상태를 추적하는 기능이 없고 발생하게 되면 프로그램을 강제 종료하기 전에는 멈춘 상태를 유지한다. 
+
+### 10.1.1 락 순서에 의한 데드락 
+> 프로그램 내부의 모든 스레드에서 필요한 락을 모두 같은 순서로만 사용한다면, 락 순서에 의한 데드락은 발생하지 않는다. 
+- 반대로 락은 순서를 교차로 하게 되면 데드락 상태에 빠지게 된다. 
+```java
+public class LeftRightDeadlock {
+  private final Object left = new Object();
+  private final Object right = new Object();
+  
+  public void leftRight(){
+    synchronized (left) {
+      synchronized (right) {
+        //..
+      }
+    }
+  }
+
+  public void rigthLeft(){
+    synchronized (right) {
+      synchronized (left) {
+        //..
+      }
+    }
+  }
+}
+```
+
+### 10.1.2 동적인 락 순서에 의한 데드락 
+- TransferMoney 메소드는 데드락이 발생하는 부분이 없다고 생각할 수 있지만 멀티 스레드 환경에서는 데드락이 발생할 수 있다. 
+- transferMoney(myAccount, yourAccount, 1_000), transferMoney(yourAccount, myAccount, 1_000) 처러 동시 호출시 서로 락을 가진 데드락이 발생한다.
+```java
+public void transferMoney(Account fromAccount, Account toAccount, DollarAmount amount){
+  synchronized (fromAccount) {
+    synchronized (toAccount) {
+      fromAccount.debit(amount);
+      toAccount.credit(amount);
+    }
+  }
+}
+```
