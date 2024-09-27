@@ -2135,9 +2135,183 @@ public String getStoogeNames() {
 }
 ```
 
-### 11.4 락 경쟁 줄이기 
+## 11.4 락 경쟁 줄이기 
 - 작업 순차적으로 처리하면 확장성을 놓이고, 작업을 병렬로 처리하면 컨택스트 스위칭에서 성능에 악영향을 준다. 
 - 락을 놓고 경쟁하는 상황이 벌어지면 순차적으로 처리함과 동시에 컨텍스트 스위칭도 많이 일어나므로 확장성과 성능을 동시에 떨어뜨리는 원인이 된다. 
 - 따라서 락 경쟁을 줄이면 확장성과 성능을 함께 높일 수 있다. 
+  - 락을 확보한 채로 유지되는 시간을 최대한 줄여라
+  - 락을 확보하고자 요청하는 횟수를 최대한 줄여라
+  - 독점적인 락 대신 병렬성을 크게 높여주는 여러 가지 조율 방법을 사용하라. 
 
+### 11.4.1 락 구역 좁히기 
+- 락이 필요하지 않는 코드를 synchronized 블록 밖으로 뽑아내면 락을 유지하는 시간을 줄일 수 있다. 
+- 특히 I/O 작업과 같이 대기 시간이 발생할 수 있는 코드는 최대한 synchronized 블록 밖으로 보내자.
 
+### 11.4.2 락 정밀도 높이기 
+- 락을 확보하기 위해 경쟁하는 시간을 줄일 수 있는 방법으로 스레드에서 해당 락을 덜 사용하도록 변경하는 방법 
+- 락 분할, 락 스트라이핑 방법이 있는 두 가지 모두 하나의 락으로 여러 개의 상태 변수를 묶어 두지 않고 서로 다른 락을 사용하는 방법이다.
+- 락이 분활된 ServerStatus 클래스를 보면 users, queries 두 개의 상태변수를 서로 다른 락으로 분할해서 락 경쟁을 줄였다.
+
+```java
+@ThreadSafe
+public class ServerStatus {
+    public final Set<String> users;
+    public final Set<String> queries;
+    
+    public void addUser(String u) { 
+        synchronized (users) {
+            users.add(u);
+        }
+    }
+    public void addQuery(String q) {
+        synchronized (queries) {
+            queries.add(q);
+        }
+    }
+}
+```
+
+### 11.4.3 락 스트라이핑 
+- 독립적인 객체를 여러 가지 크기의 단위로 묶어내고, 묶인 블록을 단위로 락을 나누는 방법
+- ConcurrentHashMap 클래스가 수현된 소스코드를 보면 16개의 락을 배열로 두고, N번째 해시 값은 락 밸열에서 N mod 16 의 락으로 동기화 한다.
+```java
+@ThreadSafe
+public class StripedMap {
+    // 동기화 정책 : buckets[n] 은 locks[n%N_LOCK] 락으로 동기화 한다.
+    private static final int N_LOCKS = 16;
+    private final Node[] buckets;
+    private final Object[] locks;
+    public Object get(Object key) {
+        synchronized (locks[hash(key) % N_LOCKS]){
+            //... 생략
+        }
+    }
+}
+```
+### 11.4.5 독점적인 락을 최소화 하는 다른 방법
+- 좀더 높은 병렬성으로 공유된 변수를 관리하는 방법을 도입해서 독접적인 락을 사용하는 부분을 줄이는 것이다. 
+- 예를 들어 병렬 컬렉션 클래스를 사용하거나 읽기-쓰기 락을 사용하거나 불변 객체를 사용하고 단일 연산 변수를 사용하는 등의 방법
+
+### 11.4.6 CPU 활용도 모니터링 
+- 만약 2개 이상의 CPU가 장착된 시스템에서 일부 CPU만 일하고 있다면 프로그램 병렬성을 높이는 방법을 찾아 적용하는 일이다.
+- CPU를 출분히 활용하지 못하고 있는 원인
+  - 부하가 부족한 경우
+  - I/O 제약 
+  - 외부 제약 사항
+  - 락 경쟁
+  
+### 11.4.7 객체 풀링은 하지 말자
+- 객체 풀은 더 이상 사용하지 않는 객체를 가비지 컬렉터에 넘기는 대신 재상요할 수 있게 보관하고, 꼭 필요한 경우만 객체를 생성하는 방식
+- 스레드 동기화하는 것보다 메모리에 객체를 할당하는 일이 훨씬 부담이 적다. 
+
+## 11.5 예제: Map 객체의 성능 분석
+- 단일 스레드 환경에서 ConcurrentHashMap 은 동기화된 HashMap 보다 성능이 약간 빠르다. 하지만 병렬 처리 환경에서 성능이 빛을 발한다. 
+
+## 11.6 컨텍스트 스위치 부하 줄이기
+- 스레드가 락을 확보한 상태에서 I/O 연산이 끝날 때까지 대기 상태로 드들어가 있다면, 실행 중인 다른 스레드가 이미 누군가가 확보하고 있는 락을 필요로 할 가능 성이 높다
+- 락을 놓고 경쟁하고 있다는 말은 컨텍스트 스위치가 많이 일어나게 되어 성능이 저하된다. 
+
+# 12 병렬 프로그램 테스트 
+- 병렬 프로그램 테스트 결과는 안정성과 활동성의 문제로 귀결된다. 안좋은 일이 발생하지 않는 상황을 안전성이라고 하고 결국 좋은 일이 발생하는 상황을 활동성 이라한다. 
+- 처리량: 병렬로 실해되는 여러 개의 작업이 각자가 할 일을 끝내는 속도
+- 응답성: 요청이 들온 이후 작업을 마치고 결과를 줄 때까지의 시간 (지연시간)
+- 확장성: 자원을 더 많이 확보할 때마다 그에 따라 처리할 수 있는 작업량이 놀어나느 정도 
+
+## 12.1 정확성 테스트 
+- 병렬 프로그램을 테스트 하기 위한 프로그램을 작성할 때는 순차적인 프로그램 테스트하는 경우와 똑같은 문서작업으로 시작
+- 올바른 값을 정확하게 알고 있는 변수가 어떤것이 있는지, 그 변수가 최종적으로 어떤 값을 가져야 하는 등의 내용을 확인해야 한다. 
+- 정확성 테스트 대해 확실하게 이해 할 수 있는 예제로 크기가 제한된 버퍼 클래스에 대한 케이스를 구현해보자
+```java
+
+public class BoundBuffer <E> {
+    private final Semaphore availableItems, avilableSpaces;
+
+    @GuardedBy("this") private final E[] items;
+    @GuardedBy("this") private int putPosition = 0, takePosition = 0;
+
+    public BoundBuffer(int capacity) {
+        availableItems = new Semaphore(0);
+        avilableSpaces = new Semaphore(capacity);
+
+        this.items = (E[]) new Object[capacity];
+    }
+
+    public boolean isEmpty() {
+        return availableItems.availablePermits() == 0;
+    }
+
+    public boolean isFull() {
+        return avilableSpaces.availablePermits() == 0;
+    }
+
+    public void put(E x) throws InterruptedException {
+        avilableSpaces.acquire();
+        doInsert(x);
+        availableItems.release();
+    }
+
+    private synchronized void doInsert(E x) {
+        int i = putPosition;
+        items[i] = x;
+        putPosition = (++i == items.length) ? 0 : i;
+    }
+    private synchronized E doExtract(){
+        int i = takePosition;
+        E x = items[i];
+        items[i] = null;
+        takePosition = (++i == items.length) ? 0 : i;
+        return x;
+    }
+
+    public E take() throws InterruptedException {
+        availableItems.acquire();
+        E item = doExtract();
+        availableItems.release();
+        return item;
+    }
+}
+```
+
+### 12.1.1 가장 기본적인 단위테스트
+- 먼저 순차적인 프로그램과 동일하게 기본 값을 검증하는 단위테스트를 작성한다.
+
+### 12.1.2 블로킹 메소드 테스트 
+- 병렬로 동작하는 상황을 테스트하고자 한다면 스레드를 두 개 이상 실행시켜야 하는 경우가 대분분이다. 
+```java
+import developx.book.parallel.buffer.BoundBuffer;
+
+void testTakeBlocksWhenEmpty() {
+  BoundBuffer<Integer> bb = new BoundBuffer<>();
+  Thread taker = new Thread() {
+    @Override
+    public void run() {
+      try {
+        int unused = bb.take();
+        fail(); // 여기 들어오면 오류!
+      } catch (InterruptedException ignore) {
+          
+      }
+    }
+  };
+  try {
+    taker.start();
+    Thread.sleep(1_000);
+    taker.interrupt();
+    taker.join(1_000);
+    assertFalse(taker.isAlive());
+  } catch (Exception e) {
+      fail();
+  }
+}
+```
+
+### 12.1.3 안정성 테스트 
+> 안정성을 테스트하는 프로그램을 효과적으로 작성하려면 뭔가 문제가 발생했을 때 잘못 사용되는 속성을 높은 확률로 찾아내는 작업을 해야 함과 동시에 
+> 오류를 확인하는 코드가 테스트 대상의 병렬성을 인위적으로 제한해서는 안 된다는 점을 고려해야 한다. 
+> 테스트하는 대상 속성의 값을 확인할 때 추가적인 동기화 작업을 하지 않아도 된다면 가장 좋은 상태라고 볼수 있다. 
+
+### 12.1.4 자원 관리 테스트 
+- 하지 말아햐 할 일을 실제로 하지 않는지 테스트하는 일이다. 자원을 제대로 관리하는 테스트 
+
+### 12.1.5 콜백 사용 
+- 클라이언트가 제공하는 코드에 콜백 구조를 적용하면 테스트 케이스 구현하는 데 도움이 된다. 
