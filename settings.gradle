@@ -1,3 +1,4 @@
 rootProject.name = 'book-report'
 include 'parallel-programing'
+include 'implementation-patterns'
 
