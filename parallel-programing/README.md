@@ -2323,7 +2323,7 @@ void testTakeBlocksWhenEmpty() {
 
 ## 12.2 성능 테스트
 - 특정한 사용 환경 시나리오를 정해두고, 해당 시나리오를 통과하는 데 얼마만큼의 시간이 걸리는 측정하고자 하는 데 목적
-- 성과 관련된 스레드의 개수, 버퍼의 크기등과 같은 각종 수치를 봅아내고자 함이다. =
+- 성과 관련된 스레드의 개수, 버퍼의 크기등과 같은 각종 수치를 봅아내고자 함이다.
 
 ### 12.2.1 PutTakeTest에 시간 측정 부분 추가 
 > 단일 연산을 실행한 이후 해당 연산에 대한 시간을 구하기보다는, 단일 연산을 굉장히 많이 실행시켜 전체 실행 시간을 구한 다음 
@@ -2368,3 +2368,249 @@ void testTakeBlocksWhenEmpty() {
 ### 12.4.2 정적 분석 도구 
 ### 12.4.3 관점 지향 테스트 방법
 ### 12.4.4 프로파일러와 모니터링 도구
+
+
+# 13 명시적인 락 
+> 자바 5.0 전에는 synchronized 블럭과 volatile 키워드만 제공하고 있었다. 자바 5.0에 ReentrantLock 이 추가 되었는데 암묵적인 락으로 할 수 없는 여러가지 고급 기능이 추가되었다.
+
+## 13.1 Lock 과 ReentrantLock 
+- Lock 인터페이스는 여러가 락 관련 기능에 대한 추상 메소드를 정의하고 있다. 
+- 암묵적인 락과 달리 조건 없는 락, 풀링 락, 타임아웃이 있는 락, 락 확보 대기 상태에 인터럽트 걸 수 있는 방법 등이 포함되어 있다. 
+```java
+public interface Lock {
+    void lock();
+    void lockInterruptibly() throws InterruptedException;
+    boolean tryLock();
+    boolean tryLock(long time, TimeUnit unit) throws InterruptedException;
+    void unlock();
+    Condition newCondition();
+}
+```
+> ReentrantLock 클래스  
+> Lock 인터페이스를 구현하며, synchronized 구문과 동일한 메모리 가시성과 상호 배제 기능을 제공한다.
+
+```java
+import java.util.concurrent.locks.ReentrantLock;
+
+public void test(){
+  Lock lock = new ReentrantLock();
+  lock.lock();
+  try{
+      // 임계 영역 코드
+  } finally {
+      lock.unlock();
+  }
+}
+```
+
+### 13.1.1 폴링과 시간 제한이 있는 락 확보 방법
+- tryLock 메소드가 지원하는 풀링 락 확보 방법이나 시간 제한이 있는 락 확보 방법은 오류가 발생했을 때 일반적인 락을 확보하는 방법도다 오류를 잡아내기 깔끔한 방법
+- 암묵적인 락을 사용할 때에는 데드락이 발생하면 프로그램이 멈춰버리는 치명적인 상황에 이른다. 
+- 락을 확보할 때 시간 제한을 두거나 폴링방법을 사용하면 락을 확보하지 못하는 상황에도 통제권을 다시 얻을 수 있다. 
+  - tryLock 메소드로 양쪽 락을 모두 확보하도록 돼있지만, 만약 양쪽 모두 확보할 수 없다면 잠시 대기하였다가 재시도하도록 돼 있다. 
+```java
+public boolean transferMoney(Account fromAcct, Account toAcct, DollarAmount amount){
+    
+    while (true) {
+        if(fromAcct.lock.tryLock()){
+            try {
+                if (toAcct.lock.tryLock()) {
+                    try {
+                        // critical section
+                    } finally {
+                        toAcct.unlock();
+                    }
+                }
+            } finally {
+                fromAcct.unlock();
+            }
+        }
+    }
+} 
+```
+  - 지정된 시간 이내에 결과를 내지 못하는 상황이 되면 알아서 기능을 멈추고 종료되도록 만들 수 있다.
+```java
+public boolean trySendOnSharedLine(String message) throws InterruptedException {
+    if (!lock.tryLock(1000, TimeUnit.MICROSECONDS)){
+        return false;        
+    }
+    try {
+      // critical section
+    } finally {
+        lock.unlock();
+    }
+}
+```
+
+### 13.1.2 인터럽트 걸 수 있는 락 확보 방법
+- lockInterruptibly 메소드를 사용하면 인터럽트는 그래로 처리할 수 있는 상태에서 락을 확보한다. 
+- tryLock 메소드 역시 인터럽트를 걸면 반응하도록 돼 있다. 
+
+### 13.1.3 블록을 벗어나는 구조의 락 
+- 암묵적인 락을 사용하는 경우 블록에 구조에 맞춰 락을 확보하고 해제할 수 있었다. 명시적인 락을 사용하면 조금 더 유연하게 구성할 수 있다. 
+
+## 13.2 성능에 대한 고려 사항 
+- 성능 측적 결과는 움직이는 대상이다 바로 어제 x가 y보다 빠르다는 결과를 산출했던 성능 테스트를 오늘 실행해보면 다른 결과를 얻을 수도 있다. 
+
+## 13.3 공정성 
+- ReentrantLock 클래스는 불공정 락, 공정 락 모두 설정을 지원한다. 
+- 공정락은 요청에 순서에 따라 처리가 되긴 하지만 성능에 큰 지장을 주게 된다. 
+- 대부분의 경우 공정락에 얻는 장점보다 불공정 락을 처리해서 얻는 성능상의 이점이 크다. 
+
+## 13.4 synchronized 또는 ReentrantLock 선택 
+- ReentrantLock은 암묵적인 락만으로는 해결할 수 없는 복잡한 상황에서 사용하기 위한 고급 동기화 기능이다. 
+  - 1) 락을 확보할 때 타임아웃을 지정해야 하는 경우
+  - 2) 폴링의 형태로 락을 확보하고자 하는 경우
+  - 3) 락을 확보하느라 대기 상태에 들어가 있을때, 인터럽트를 걸 수 있어야 하는 경우
+  - 4) 대기 상태 큐 처리 방법을 공정하게 해야하는 경우 
+  - 5) 코드가 단일 블록의 형태가 넘어서는 경우 
+
+## 13.5 읽기-쓰기 락
+- ReadWriteLock 은 읽기 작업은 여러 개를 한꺼번에 처리할 수 있지만 쓰기 작업은 혼자만 동작할 수 있는 구조의 동기화를 처리해주는 락이다. 
+```java
+public interface ReadWriteLock {
+    Lock readLock();
+    Lock writeLock();
+}
+```
+- ReadWriteLock 구현할때 적용할 수 있는 특성 
+  - 락 해제 방법: 쓰기 작업에서 락을 해제했을 때, 대기 큐에서 읽기 작업뿐만 아니라 쓰기작업도 대기중이면 누구에게 락을 넘겨줄 것인가
+  - 읽기 순서 뛰어넘기: 읽기 작업에서 락을 사용하고 있고, 대기 큐에 쓰기 작업이 대기하고 있을 때 순서 조절
+  - 재진입 특성: 읽기 쓰기 작업 모두 재진입 가능한가?
+  - 다운그레이드: 쓰기락을 가지고 있을 때 읽기 락을 추가 확보할 수 있는가? 
+  - 업그레이드: 읽기 락을 확보하고 있는 상태에서 쓰기락을 확보할 수 있는가? (데드락 위험으로 지원하지 않는다)
+- 읽기 쓰기 락은 락을 확보하는 시간이 약간은 길면서 쓰기 락을 요청하는 경우가 적을 때에 병렬성을 크게 높여준다.
+
+```java
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+public class ReadWriteMap<K, V> {
+    private final Map<K, V> map;
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
+    private final Lock readLock = lock.readLock();
+    private final Lock writeLock = lock.writeLock();
+    
+    public V put(K key, V value) {
+        readLock.lock();
+        try {
+            return map.put(key, value);
+        } finally {
+            readLock.unlock();
+        }
+    }
+
+    public V get(K key) {
+        writeLock.lock();
+        try {
+            return map.get(key);
+        } finally {
+            writeLock.unlock();
+        }
+    }
+}
+```
+
+# 14 동기화 클래스 구현 
+## 14.1 상태 종속성 관리 
+- 병렬 프로그램에서는 상태 기반의 조건은 다른 스레드를 통해서 언제든지 마음대로 변경될 수 있다. 
+- 상태 종속적인 기능을 구현할 때 원하는 선행 조건이 만족할 때까지 작업을 멈추고 대기하도록 하면 프로그램이 멈춰버리는 방법보다 훨씬 간편하고 오류도 적게 발생한다. 
+- 선행 조건에 오류가 발생했을 때 오류를 처리하는 여러 가지 방법을 적용할 예정이다. 
+
+### 14.1.1 예제: 선행 조건 오류를 호출자에게 그대로 전달 
+```java
+public class GrumpyBoundedBuffer<V> {
+    
+    public synchronized void put(V v) throws BufferFullException {
+      if (isFull()) {
+          throw new BufferFullException();
+      }
+      doPut(v);
+    }
+    public synchronized V take() throws BufferEmptyException {
+        if(isEmpty()) {
+            throw new BufferEmptyException();
+        }
+        return doTake();
+    }
+}
+```
+### 14.1.2 예제: 풀링과 대기를 반복하는 세련되지 못한 대기 상태
+```java
+public class SleepyBoundedBuffer<V> {
+    public void put(V v) throws InterruptedException {
+        while (true) {
+            synchronized (this) {
+                if (!isFull()) {
+                    doPut(v);
+                    return;
+                }
+            }
+            Thread.sleep(1);
+        }
+    }
+    public V take() throws InterruptedException {
+        while(true) {
+            synchronized (this) {
+                if(!isEmpty()) {
+                    return doTake();
+                }
+            }
+            Thread.sleep(1);
+        }
+    }
+}
+```
+
+### 14.1.3 조건 큐 
+- 여러 스레드를 한 덩어리 (대기집합 wait set)로 묶어 특정 조건이 만족할 때까지 한꺼번에 대기할 수 있는 방법을 제공한다.
+- 모든 객체는 스스로를 조건 큐로 사용할 수 있으며, wait, notify, notifyAll 메소드를 가지고 있다. 
+```java
+public class BoundedBuffer<V> {
+    public synchronized void put(V v) throws InterruptedException {
+        while (isFull()) {
+            wait();
+        }
+        doPut(v);
+        notifyAll();
+    }
+    public synchronized V take() throws InterruptedException {
+        while(isEmpty()) {
+            wait();
+        }
+        V v = doTake();
+        notifyAll();
+        return v;
+    }
+}
+```
+
+## 14.2 조건 큐 활용
+- 조건 큐를 제대로 활용하려면 꼭 지켜야만 하는 몇 가지 규칙이 있다. 
+
+### 14.2.1 조건 서술어
+- 해당 객체가 대기하게 될 조건 서술어를 명확하게 구분해야 한다. 
+- 조건 큐와 연결된 조건 서술어를 항상 문서로 남겨야 하며, 그 조건 서술어에 영향을 받는 메소드가 어느 것인지도 명시해야 한다. 
+> wait 메소드를 호출하는 모든 경우에서는 항상 조건 서술어가 연결돼 있다. 특정 조건 서술어를 놓고 waite 메소드를 호출할 때,
+> 호출자는 항상 해당하는 조건 큐에 대한 락을 이미 확보한 상태여야 한다. 
+> 또한 확보한 락은 조건 서술어를 확인하는 데 필요한 모든 상태 변수를 동기화하고 있어야 한다. 
+
+### 14.2.2 너무 일찍 깨어나기 
+- wait 메소드를 호출했던 스레드가 대기 상태에서 깨어나 다시 실행된다고 보면, 조건 큐와 연결돼 있는 락을 다시 확보한 상태지만, 조건 서술어를 만족했는지는 알수 없다. 
+- 조건부 wait 메소드 사용시 확인사항 
+  - 항상 조건 서술어를 명시해야 한다. 
+  - wait 메소드를 호출하기 전에 조건 서술어를 확인하고 wait에서 리턴된 이후에도 조건 서술어를 확인해야 한다. 
+  - wait 메소드는 항상 반복문 내부에서 호출해야 한다. 
+  - 조건 서술어를 확인하는 데 관련된 모든 상태 변수는 해당 조건 큐의 락에 의해 동기화돼 있어야 한다. 
+  - wait, notify, notifyAll 메소드를 호출할 때는 조건 큐에 해당하는 락을 확보하고 있어야 한다. 
+  - 조건 서술어를 확인한 이후 실제 작업을 싱행해 작업이 끝날 때까지 락을 해제해서는 안 된다. 
+
+### 14.2.3 놓친 신호 
+- 특정 스레드가 이미 참을 만족하는 조건을 놓고 조건 서술어를 제대로 확인하지 못해 대기 상태에 들어가는 상황
+
+### 14.2.4 알림 
+- 특정 조건을 놓고 wait 메소드를 호출해 대기 상태에 들어간다면, 해당 조건을 만족하게 된 이후에 반드시 알림 메소드를 사용해 대기 상태에서 나오게 해야 한다. 
+- notify 메소드가 notifyAll 보다 더 자원 활용면에서 효율적이지 않지만 안정적이지 않기 떄문에 notifyAll 을 사용하자. 
+- 일단 제대로 동작하게 만들어라 그리고 속도가 나지 않는 경우에만 최적화를 진행해라
+
+### 14.2.5 예제: 게이트 클래스 
