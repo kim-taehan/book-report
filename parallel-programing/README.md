@@ -2932,3 +2932,64 @@ public class UnsafeLazyInit {
 ### 16.2.2 안전한 공개 
 - 객체를 공개하는 작업이 다른 스레드에서 해당 객체에 대한 참조를 가져다 사용하는 작업보다 미리 발생하도록 만들어져 있어 공개된 객체가 다른 스레드에게 올바른 상태로 보인다는 것을 말한다. 
 
+### 16.2.3 안전한 초기화를 위한 구문 
+- 스레드 안전한 초기화 방법
+```java
+@ThreadSafe
+public class SafeLazyInitialization {
+    private static Resource resource;
+    public synchronized static Resource getInstance(){
+        if(resource == null) resource = new Resource();
+        return resource;
+    }
+}
+```
+- 성질 급한 초기화
+```java
+@ThreadSafe
+public class EagerInitialization {
+    private static Resource resource = new Resource();
+    public  static Resource getInstance(){
+        return resource;
+    }
+}
+```
+- 늦은 초기화 홀더 클래스 
+  - ResourceHolder 클래스를 실제로 사용하기 전까지는 해당 클래스를 초기화하지 않는다.
+  - Resource 클래스 역시 static 초기화 구분에서 초기화하기 떄문에 추가적인 동기화 기법을 적용할 필요가 없다. 
+  - 어느 스레드건 간에 처음 getResource 메소드를 호출하면 JVM에서 ResourceHolder 클래스를 읽어 초기화하고, 더불어 Resource 클래스도 초기화 된다.
+```java
+@ThreadSafe
+public class ResourceFactory {
+    private static class ResourceHolder {
+        public static Resource resource = new Resource();
+    }
+    
+    public static Resource getResource() {
+        return ResourceHolder.resource;
+    }
+}
+```
+
+### 16.2.4 더블 체크 락 
+- 늦은 초기화 홀더 클래스 구문은 DCL 보다 훨씬 이해하기 쉬운면서 동일한 기능을 제공한다. 결론 쓰지말자
+```java
+@ThreadSafe
+public class DoubleCheckedLocking {
+    private static Resource resource;
+    public static Resource getInstance(){
+        if(resource == null) {
+          synchronized (DoubleCheckedLocking.class) {
+            if (resource == null) {
+                resource = new Resource();
+            }
+          }
+        }
+        return resource;
+    }
+}
+```
+
+## 16.3 초기화 안정성 
+- 올바르게 생선된 불변 객체를 어떤 방법으로 공개하더라도 여러 스레드에서 별다른 동기화 구분 없이 안전하게 사용할 수 있다. 
+- final 로 선언된 변수를 갖고 있는 클래스는 초기화 안정성 조건 떄문에 해당 ㅅ인스턴스에 대한 참조를 최초로 생성하는 과정에서 재배치 작업이 일어나지 않는다.
