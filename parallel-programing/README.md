@@ -2614,3 +2614,321 @@ public class BoundedBuffer<V> {
 - 일단 제대로 동작하게 만들어라 그리고 속도가 나지 않는 경우에만 최적화를 진행해라
 
 ### 14.2.5 예제: 게이트 클래스 
+- 조건부 대기 기능을 활용하여 여러번 닫을 수 있는 래치 구조 작성
+```java
+@ThreadSafe
+public class ThreadGate {
+
+    // 조건 서술어: opened-since(n) (isOpen || generation>n)
+    @GuardedBy("this") private boolean isOpen;
+    @GuardedBy("this") private int generation;
+
+    public synchronized void close() {
+        isOpen = false;
+    }
+
+    public synchronized void open(){
+        ++generation;
+        isOpen = true;
+        notifyAll();
+    }
+
+    // 만족할 때까지 대기
+    public synchronized void await() throws InterruptedException {
+        int arrivalGeneration = generation;
+        while (!isOpen && arrivalGeneration == generation) {
+            wait();
+        }
+    }
+}
+```
+
+### 14.2.6 하위 클래스 안정성 문제 
+- 조건부 알림 기능이나 단일 알림 기능을 사용하고 나면 해당 클래스의 하위 클래스를 구현할 때 상당히 복잡해지는 문제가 생길 수 있다. 
+
+### 14.2.7 조건 큐 캡술화 
+- 조건 큐를 클래스 내부에 캡슐화해서 클래스 상속 구조의 외부에서 해당 조건 큐를 사용할 수 없도록 막는게 좋다. 
+
+### 14.2.8 진입 규칙과 완료 규칙
+> 진입 규칙은 해당 연산의 조건을 뜻한다. 완료 규칙은 해당 연산으로 인해 변경됐을 모든 상태 값이 변경되는 시점에 다른 연산 조건도 변경됐을 가능성이 있으므로 해당 조건 큐에 알림 메시지를 보내야 한다는 규칙이다.
+
+
+## 14.3 명시적인 조건 객체
+- 암묵적인 락을 일반화한 형태가 Lock 클래스인 것처럼 암묵적인 조건 큐를 일반화한 형태는 바로 Condition 클래스이다. 
+```java
+public interface Condition {
+  void await() throws InterruptedException;
+  void awaitUninterruptibly();
+  long awaitNanos(long nanosTimeout) throws InterruptedException;
+  boolean await(long time, TimeUnit unit) throws InterruptedException;
+  boolean awaitUntil(Date deadline) throws InterruptedException;
+  void signal();
+  void signalAll();
+}
+```
+- Condition 객체는 암묵적인 조건 큐와 달리 Lock 하나를 대상으로 필요한 만큼 몇개라도 만들 수 있다. 
+
+## 14.4 동기화 클래스의 내부 구조 
+- AbstractQueuedSynchronizer(AQS) 를 상속받아 많은 동기화 클래스들이 구현되어 있다. ReentrantLock, Semaphore, CountDownLatch, ReentrantReadWriteLock, SynchronousQueue, FutureTask 등 
+
+## 14.5 AbstractQueuedSynchronizer(AQS)
+- AQS 기반의 동기화 클래스가 담당하는 작업 가운데 가장 기본이 되는 연산은 바로 확보와 해제 이다.
+- 확보 연산은 상태 기반으로 동작하며 항상 대기 상태에 들어갈 가능성이 있다. 
+- 해제 연산은 대기 상태에 들어가지 않으며, 대신 확보연산에서 대기중인 스레드를 풀어주는 역할을 한다.
+
+### 14.5.1 간단한 래치 
+- OneShotLatch 클래스는 AQS 를 기반으로 구현한 바이너리 래치이다. 확보연산(await), 해제연산(signal)
+- await 를 호출한 스레드는 래치가 열린 상태로 넘어가기 전에는 모두 대기 상태에 들어간다. 
+```java
+
+public class OneShotLatch {
+    private final Sync sync = new Sync();
+
+    public void signal() {
+        sync.releaseShared(0);
+    }
+
+    public void await() throws InterruptedException {
+        sync.acquireSharedInterruptibly(0);
+    }
+
+    private class Sync extends AbstractQueuedSynchronizer {
+
+        protected int tryAcquireShared(int ignored) {
+            // 래치가 열려 있는 상태라면 성공
+            return (getState() == 1) ? 1 : -1;
+        }
+
+        @Override
+        protected boolean tryReleaseShared(int arg) {
+            setState(1); // 래치가 열렸다
+            return true; // 다른 스레드에서 확보 연산에 성공할 가능이 있다.
+        }
+    }
+}
+```
+
+## 14.6 java.util.concurrent 패키지의 동기화 클래스에서 AQS 활용 모습
+### 14.6.1 ReentrantLock 
+- 동기화 상태 값을 확보된 락의 개수를 확인하는 데 사용하고 owner 라는 변수를 통해 락을 가져간 스레드가 어느 스레드인지도 관리한다. 
+- AQS가 기본적으로 제공하는 기능인 다중 조건 변수와 대기 큐도 그래도 사용한다. (Lock.newCondition 메소드를 호출하면 AQS의 ConditionObject 객체를 받아서 사용할 수 있다.)
+
+### 14.6.2 Semaphore 와 CountDownLatch
+- Semaphore는 AQS 의 동기화 상태를 사용해 현재 남아 있는 퍼밋의 개수를 관리한다. 
+- CountDownLatch 클래스도 동기화 상태 값을 현재 개수로 사용하는 세마포어와 비슷한 형태로 활용한다. 
+
+### 14.6.3 FutureTask
+- 작업의 실행 상황, 즉 실행 중이거나 완료됐거나 취소되는 등의 상황을 관리하는 데 AQS 내부의 동기화 상태를 활용한다. 
+- 작업이 끝나면서 만들어낸 결과 값이나 작업에서 오류가 발생했을 떄 해당하는 예외객체를 담아둘 수 있는 추가적인 상태 변수도 가지고 있다. 
+
+### 14.6.3 ReentrantReadWriteLock
+- AQS 하위 클래스 하나로 읽기 쓰기 작업을 모두 담당한다. 
+
+# 15 단일 연산 변수와 넌블로킹 동기화
+- 넌 블로킹 알고리즘은 락을 기반으로 하는 방법보다 설계와 구현 모두 복자하며, 대신 확장성과 활동성을 엄청나게 높여준다. 
+- 여러 스레드가 동일한 자료를 놓고 경쟁하는 과정에서 대기 상태에 들어가는 일이 없기 때문에 스케줄링 부하를 줄여준다. 
+
+## 15.1 락의 단점
+- 스레드의 실행을 중단했다가 계속해서 실해하는 작업은 상당한 부하를 발생시키며 일반적으로 적지 않은 시간동안 작업이 중단된다. 
+- volatile 변수는 락과 비교해 봤을 때 컨텍스트 스위칭이나 스레드 스케줄링과 관계가 없기 떄문에 락보다 훨씬 가벼운 동기화 방법이다. (단일 연산만 가능)
+- 스레드가 락을 확보하기 위해 대기하고 있는 상태에서 대기 중인 스레드는 다른 작업을 전혀 못한다. 
+
+## 15.2 병렬 연산을 위한 하드웨어적인 지원 
+- 배타적인 락 방법은 보수적인 동기화 기법이다. 즉 가장 최악의 상황을 가정하고 완전하게 확실한 조치를 취하기 전에는 더 이상 진행하지 않는 방법이다.
+
+### 15.2.1 비교 후 치환 
+- CAS 연산 (Compare and Swap) 에는 3개의 인자를 넘겨주는데 작업한 대상 메모리 위치, 예상하는 기존값, 새로 설정한 값이다. 
+- 만약 예상하는 기존값이 일치하지 않으면 아무일도 하지않고 일치한 경우만 새로 설정한 값을 입력하게 된다. 
+
+### 15.2.2 넌블로킹 카운터 
+- CasCounter 클래스 Cas 연산을 사용해 대기 상태에 들어가지 않으면서도 스레드 안전한 카운터 클래스이다.
+```java
+public class CasCounter {
+    private SimulatedCas value;
+    public int getValue() {
+      return value.get();
+    }
+    public int increment() {
+        int v;
+        do {
+            v = value.get();
+        } while (v != value.compareAndSwap(v, v + 1));
+        return v + 1;
+    }
+  
+}
+```
+
+### 15.2.3 JVM 에서 CAS 연산 지원
+- AtomicXXX 클래스를 통해 제공한다. java.util.concurrent 패키지의 클래스 대부분을 구현할때, 이를 직간접으로 사용한다. 
+
+## 15.3 단일 연산 변수 클래스 
+- 단일 연산변수 atomic variable 는 락보다 가벼우면서 세밀한 구조를 가지고 있으며, 멀티 프로세스 환경에서 병렬 프로그램을 작성시에 핵심적인 역할을 한다. 
+- 이를 사용해 스레드가 경쟁하는 범위를 하나의 변수로 좁혀주는 효과가 있으며, 이 정도의 범위는 프로그램에서 할 수 있는 가장 세밀한 범위이다. 
+
+### 15.3.1 더 나은 volatile 변수로의 단일 연산 클래스
+- CasNumberRange 클래스는 두개의 int 를 가지고 있는 IntPair 클래스에 경쟁조건이 발생하지 않게 하면서 두 개의 값을 변경할 수 있다.
+```java
+import java.util.concurrent.atomic.AtomicReference;
+
+public class CasNumberRange {
+  @Immutable
+  private static class IntPair {
+    final int lower;
+    final int upper;
+    //...
+  }
+
+  private final AtomicReference<IntPair> value = new AtomicReference<>(new IntPair(0, 0));
+
+  public void setLower(int i) {
+    while (true) {
+        IntPair oldV = value.get();
+        IntPair newV = new IntPair(i, oldV.upper);
+        if (value.compareAndSet(oldV, newV)) {
+            return;
+        }
+    }
+  }
+}
+```
+
+### 15.3.2 성능 비교: 락과 단일 연산 변수 
+- 경쟁이 많은 상황엣서는 단일 연산 변수보다 락이 빠르게 처리되지만 실제적인 경쟁 상황에서는 단일 연산 변수가 락보다 성능이 좋다. 
+- 단일연산 변수를 사용하면 경재이 발생하면 그 즉시 재시도를 하기에 CPU 사용량도 올라가게 되고 계속해서 경쟁을 하게 된다. 
+
+## 15.4 넌블로킹 알고리즘 
+- 특정 스레드에서 작업이 실패하거나 또는 대기 상태에 들어가는 경우에 다른 어떤 스레드라도 그로 인해 실패하거나 대기 상태에 들어가지 않는 알고리즘
+
+### 15.4.1 넌블로킹 스택 
+- 넌블로킹 알고리즘을 구성할 때 가장 핵심이 되는 부분은 바로 데이터의 일관성을 유지하면서 단일 연산 변경 작업의 범위를 단 하나의 변수로 제한하는 부분이다. 
+```java
+
+@ThreadSafe
+public class ConcurrentStack<E> {
+    AtomicReference<Node<E>> top = new AtomicReference<>();
+    public void push(E item) {
+        Node<E> newHead = new Node<>(item);
+        Node<E> oldHead;
+        do {
+            oldHead = top.get();
+            newHead.next = oldHead;
+        } while (!top.compareAndSet(oldHead, newHead));
+    }
+    public E pop() {
+        Node<E> oldHead;
+        Node<E> newHead;
+
+        do {
+            oldHead = top.get();
+            if (oldHead == null) {
+                return null;
+            }
+            newHead = oldHead.next;
+        } while (!top.compareAndSet(oldHead, newHead));
+        return oldHead.item;
+    }
+    @RequiredArgsConstructor
+    private static class Node<E> {
+        public final E item;
+        public Node<E> next;
+    }
+}
+```
+
+### 15.4.2 넌블로킹 연결 리스트 
+- 연결 큐는 리스트의 머리와 꼬리 부분에 직접적으로 접근할 수 있어야 하기 때문에 스택보다 복잡한 구조를 가지고 있다. 
+```java
+public class LinkedQueue <E> {
+
+    @RequiredArgsConstructor
+    private static class Node <E> {
+        final E item;
+        final AtomicReference<Node<E>> next;
+    }
+
+    private final Node<E> dummy = new Node<>(null, null);
+    private final AtomicReference<Node<E>> head = new AtomicReference<>(dummy);
+    private final AtomicReference<Node<E>> tail = new AtomicReference<>(dummy);
+
+    public boolean put(E item) {
+        Node<E> newNode = new Node<>(item, null);
+        while (true) {
+            Node<E> curTail = tail.get();
+            Node<E> tailNext = curTail.next.get();
+
+            if (curTail == tail.get()) {
+                if (tailNext != null) {
+                    // 큐는 중간 상태이고, 꼬리 이동
+                    tail.compareAndSet(curTail, tailNext);
+                } else {
+                    if (curTail.next.compareAndSet(null, newNode)) {
+                        // 추가작업 성공, 꼬리 이동
+                        tail.compareAndSet(curTail, newNode);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+}
+```
+### 15.4.3 단일 연산 필드 업데이트
+- AtomicReferenceFieldUpdater 단일 연산 참조 클래스로 연결하는 대신 일반적인 volatile 변수를 사용해 연결하고, 연결 구조를 변경할 때는 리플렉션 기반으로 변경한다. 
+
+### 15.4.4 ABA 문제 
+- V 변수의 값이 내가 마지막으로 A값이라고 확인한 이후 변경된 적이 있는 지 확인하는 것으로 버전 번호를 통해 해결할 수 있다. 
+
+# 16 자바 메모리 모델
+- 자바 메모리 모델을 숨겨주는 덮게를 열고 자바 메모리 모델이 보장하는 기능과 요구사항 그리고 실제로는 어떻게 동작하는지 확인한다. 
+
+## 16.1 자바 메모리 모델은 무엇이며, 왜 사용해야 하는가? 
+- `aVariable = 3;` 라는 코드를 동기화 기법없이 멀티 스레드 환경에서 수행시에 아래 내용을 확인해야 된다. 
+  - 변수의 값을 메모리에 저장하는 대신 CPU 의 레지스터에 보관
+  - CPU 프로세서는 프로그램을 순차적으로 실행하거나 또는 병렬로 실행 할 수도 있다. 
+  - 사용하는 캐시의 형태에 따라서 할당된 값이 메모리에 실제 보관되는 시점 차이
+  - CPU 내부의 캐시에 보관된 할당 값이 다른 CPU의 시야에는 보이지 않을 수 있다. 
+
+### 16.1.1 플랫폼 메모리 모델 
+- 메모리를 공유하는 멀티프로세서 시스템은 보통 각자의 프로세서 안에 캐시 메모리를 갖고 있으며, 캐시 메모리의 내용은 주기적으로 메인 메모리와 동기화
+- 대부분의 경우 다른 프로세서가 어떤 일을 하고 있는 정보는 별로 필요 없기에 대부분 성능을 높이고자 캐시 메모리 일관성을 희생하곤 한다. 
+
+### 16.1.2 재배치 
+- 특정 작업이 지연되거나 다른 순서로 실행되는 것처럼 보이는 문제를 재배치라고 한다. 
+- 동기화가 잘 된 상태에서는 컴파일러, 런타임, 하드웨어 모두 JMM이 보장하는 가시성 수준을 위반하는 쪽으로 메모리 관련 작업을 재배치하지 못하게 한다. 
+
+### 16.1.3 자바 메모리 모델을 간략하게 설명한다면
+- 변수를 읽거나 쓰는 작업, 모니터를 잠그거나 해제하는 작업, 스레드를 시작하거나 끝나기를 기다리는 작업과 같이 여러가 작업에 대해 자바 메모리 모델을 정의한다. 
+- 하나의 변수를 두개 이상의 스레드에서 읽어가려고 하면서 쓰기 작업을 하는 스레드가 있는 경우 데이터 경쟁이 발생한다. 
+- 이와 같은 데이터 경쟁 현상이 발생하지 프로그램을 올바르게 동기화된 프로그램이라 한다. 
+- 미리 발생 규칙
+  - 프로그램 순서 규칙 : 특정 스레드에서 프로그램 된 수선에서 앞서있는 작업은 미리 발생한다.
+  - 모니터 잠금 규칙: 특정 모니터 잠금 작업이 뒤이어 오는 모든 모니터 잠금 작업보다 미리 발생
+  - volatile 변수 규칙 : volatile 쓰기 작업은 이후에 오는 읽기 작업보다 미리 발생
+  - 스레드 시작 규칙: 특정 스레드에 대한 start 작업은 스레드가 갖고 있는 모든 작업보다 미리 발생
+  - 스레드 완료 규칙: 스레드 내부의 작업은 다른 스레드에서 해당 스레드가 완료됐다는 점을 파악하는 시점보다 미리 발생한다. 
+  - 인터럽트 규칙: 다른 스레드 대상으로 인터럽트 메소드를 호출하는 작업은 인터럽트 당한 스레드 에서 사실을 파악하는 일보다 미리 발생 
+  - 완료 메소드 규칙: 특정 객체에 대한 생성 메소드가 완료되는 시점은 완료 메소드가 시작되는 시점보다 미리 발생
+  - 전이성 A->B, B->C 라면 A->C 미리 발생
+
+### 16.1.4 동기화 피기백 
+- 코드의 실행 순서를 정하는 면에서 미리 발생 규칙이 갖고 있는 능력의 수준 때문에 현재 사용중인 동기화 기법의 가시성에 얹혀가는 방법
+
+## 16.2 안전한 공개
+### 16.2.1 안전하지 못한 공개
+- 늦은 초기화 방법을 올바르게 사용하지 못한면 안전하지 않은 공개 상태가 된다. 
+```java
+public class UnsafeLazyInit {
+    private static Resource resource;
+    public static Resource getInstance(){
+        if(resource == null) resource = new Resource();
+        return resource;
+    }
+}
+```
+> 불변 객체가 아닌 이상, 특정 객체를 공개하는 일이 그 객체를 사용하려는 작업보다 미리 발생하도록 구성돼 있지 않다면 다른 스레드에서 생성한 객체를 사용하는 작업은 안전하지 않다. 
+
+
+### 16.2.2 안전한 공개 
+- 객체를 공개하는 작업이 다른 스레드에서 해당 객체에 대한 참조를 가져다 사용하는 작업보다 미리 발생하도록 만들어져 있어 공개된 객체가 다른 스레드에게 올바른 상태로 보인다는 것을 말한다. 
+
