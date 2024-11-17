@@ -550,7 +550,7 @@ public class ImprovedList<T> implements List<T> {
 - 동기화된 컬렉션 클래스는 스레드 안정성을 확보하고 있지만, 여러 개의 연산을 묶어 하나의 단일 연산처럼 사용할 때 주의해야 한다.
 ```java
 import java.util.Vector;
-public void test(Vector vector){
+public void mosaicFactory(Vector vector){
   for (int i = 0; i < vector.size(); i++) {
       // vector.size(), vector.get() 2개의 작업이 동기화 되지 않아 
       // ArrayIndexOutOfBoundsException 이 발생할 있는 코드 
@@ -2392,7 +2392,7 @@ public interface Lock {
 ```java
 import java.util.concurrent.locks.ReentrantLock;
 
-public void test(){
+public void mosaicFactory(){
   Lock lock = new ReentrantLock();
   lock.lock();
   try{
