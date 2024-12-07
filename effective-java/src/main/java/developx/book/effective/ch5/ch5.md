@@ -101,3 +101,17 @@ public class 제너릭메서드 {
 - 가변인수 기능은 배열을 노출하여 추상화가 완벽하지 못하고, 배열과 제네릭 타입 규칙이 서로 다르기 떄문이다. 
 - 메서드에 제네릭 varargs 매개변수를 사용하고자 한다면, 먼저 그 메서드가 타입 안전한지 확인하자.
 - @SafeVarargs 애노테이션을 달아 사용하자.
+
+### item 33 타입 안전 이종 컨테이너를 고려하라.
+- 컨테이너 대신 키를 매개변수화한 다음, 컨테이너에 값을 넣거나 뺼 떄 맵개변수화한 키를 함께 제공하는 방식
+```java
+public class Favorites {
+    private Map<Class<?>, Object> favorites = new HashMap<>();
+    public <T> void putFavorite(Class<T> type, T instance) {
+        favorites.put(type, instance);
+    }
+    public <T> T getFavorite(Class<T> type) {
+        return  type.cast(favorites.get(type));
+    }
+}
+```
