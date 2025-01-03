@@ -9,3 +9,7 @@
 ## [3장 프로세스 간 통신](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch3%2Fch3.md)
 - 다양한 통신 패턴 적용: 원격 프로시저 호출, 회로 차단기, 클라이언트 쪽 디스커버리, 자가 등록, 서버쪽 디스커버리, 비동기 메시징
 - 마이크로서비스 아키텍처에서 IPC의 중요성
+
+## [4장 트랜잭션 관리:사가](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch4%2Fch4.md)
+- 사가 패턴을 마이크로서비스 아키텍처에 적용하여 데이터 일관성 유지
+- 코레오그래피/오케스트레이션 방식으로 사가 편성
