@@ -13,3 +13,7 @@
 ## [4장 트랜잭션 관리:사가](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch4%2Fch4.md)
 - 사가 패턴을 마이크로서비스 아키텍처에 적용하여 데이터 일관성 유지
 - 코레오그래피/오케스트레이션 방식으로 사가 편성
+
+## [5장 비지니스 로직 설계](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch5%2Fch5.md)
+- 비지니스 로직 패턴 적용; 트랜잭션 스크립트 패턴, 도메인 모델 패턴
+- DDD 애그리거트 패턴을 응용한 비지니스 로직 설계
