@@ -29,3 +29,6 @@
 ## [8장 외부 API 패턴](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch8%2Fch8.md)
 - 다양한 클라이언트에서 사용 가능한 API를 설계하는 과제
 - API 게이트웨이 패턴 BFF 패턴 적용
+
+## [9장 마이크로서비스 테스트 1부](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch9%2Fch9.md)
+- 효율적인 마이크로서비스 테스트 전략
