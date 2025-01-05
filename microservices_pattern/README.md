@@ -21,3 +21,7 @@
 ## [6장 비지니스 로직 개발: 이벤트 소싱](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch6%2Fch6.md)
 - 이벤트 소싱 패턴을 응용한 비지니스 로직 개발
 - 이벤트 저장소 구현
+
+## [7장 마이크로서비스 쿼리 구현](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch7%2Fch7.md)
+- 마이크로서비스 아키텍처에서 데이터를 쿼리하기 어려운 이유
+- API 조합패턴, CQRS 패턴을 응용한 쿼리 구현
