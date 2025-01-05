@@ -32,3 +32,5 @@
 
 ## [9장 마이크로서비스 테스트 1부](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch9%2Fch9.md)
 - 효율적인 마이크로서비스 테스트 전략
+
+## [10장 마이크로서비스 테스트 2부](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch10%2Fch10.md)
