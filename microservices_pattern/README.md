@@ -25,3 +25,7 @@
 ## [7장 마이크로서비스 쿼리 구현](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch7%2Fch7.md)
 - 마이크로서비스 아키텍처에서 데이터를 쿼리하기 어려운 이유
 - API 조합패턴, CQRS 패턴을 응용한 쿼리 구현
+
+## [8장 외부 API 패턴](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch8%2Fch8.md)
+- 다양한 클라이언트에서 사용 가능한 API를 설계하는 과제
+- API 게이트웨이 패턴 BFF 패턴 적용
