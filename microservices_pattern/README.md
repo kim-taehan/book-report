@@ -17,3 +17,7 @@
 ## [5장 비지니스 로직 설계](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch5%2Fch5.md)
 - 비지니스 로직 패턴 적용; 트랜잭션 스크립트 패턴, 도메인 모델 패턴
 - DDD 애그리거트 패턴을 응용한 비지니스 로직 설계
+
+## [6장 비지니스 로직 개발: 이벤트 소싱](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch6%2Fch6.md)
+- 이벤트 소싱 패턴을 응용한 비지니스 로직 개발
+- 이벤트 저장소 구현
