@@ -38,3 +38,5 @@
 ## [11장 프로덕션 레디 서비스 개발](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch11%2Fch11.md)
 - 보안 서비스 개발, 외부화 구성 패턴, 관측성 패턴
 - 마이크로서비스 섀시 패턴을 응용한 서비스 개발 단순화
+
+## [12장 마이크로서비스 배포](src%2Fmain%2Fjava%2Fdevelop%2Fx%2Fmicroservices%2Fch12%2Fch12.md)
