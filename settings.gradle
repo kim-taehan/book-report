@@ -9,4 +9,5 @@ include 'obejct-orientation'
 include 'effective-java'
 include 'jvm-dig'
 include 'microservices_pattern'
+include 'jpa'
 
