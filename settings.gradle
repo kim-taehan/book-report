@@ -11,4 +11,5 @@ include 'jvm-dig'
 include 'microservices_pattern'
 include 'jpa'
 include 'implementation_patterns'
+include 'Objects'
 
