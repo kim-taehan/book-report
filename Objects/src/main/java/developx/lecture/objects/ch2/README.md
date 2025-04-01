@@ -197,7 +197,38 @@ Movie avatar = new Movie("아바타",
 - 자식 클래스는 부모 클래스가 수신할 수 있는 모든 메시지를 수신할 수 있기 때문에 외부 객체는 자식 클래스를 부모 클래스와 동일한 타입으로 간주할 수 있다. 
 - 자식 클래스가 부모 클래스를 대신하는 것을 업캐스팅이라고 부른다. 
 
-
 #### 다형성 
 - 동일한 메시지를 전송하지만 실제로 어떤 메서드가 실행될 것인지는 메시지를 수신하는 객체의 클래스가 무엇이냐에 따라 달라지는 것을 다형성이라 한다.
 - 다형성은 객체지향 프로그램의 컴파일 시간 의존성과 실행 시간 의존성이 다를 수 있다는 사실을 기반으로 한다. 
+
+
+### 05 추상화와 유연성
+#### 추상화의 힘 
+- 추상화를 사용하면 세부적인 내용을 무시한 채 상위 정책을 쉽고 간단하게 표현할 수 있다. 
+- 추상화를 이용해 상위 정책을 표현하면 기존 구조를 수정하지 않고도 새로운 기능을 쉽게 추가하고 확장할 수 있다. 
+
+#### 유연한 설계
+- 할인이 없는 경우에 대한 할인 정책은 해결하지 못하였다. 
+- 할인 요금을 계산할 필요 없이 영화에 설정된 기본 금액을 그래로 사용하면 된다. 
+```java
+public class Movie {
+
+    public Money calculateMovieFee(Screening screening) {
+        // 할인 요금이 없을 때를 대비하여 예외처리가 들어간다. 
+      if (disCountPolicy == null) {
+          return fee;
+      }
+        return this.fee.minus(disCountPolicy.calculateDiscountAmount(screening));
+    }
+}
+```
+- 할인 정책이 없는 경우 예외 케이스로 취급되어 일관성이 협력방식이 무너지게 되고 Movie class 를 변경해야 된다. 
+- NonDiscountPolicy 클래스처럼 할인 금액 0인 클래스로 인해 기존의 Movie, DiscountPolicy 는 수정하지 않고 새로운 클래스 추가만으로 기능이 확장 되었다. 
+```java
+public class NonDiscountPolicy extends DisCountPolicy{
+    @Override
+    protected Money getDiscountAmount(Screening screening) {
+        return Money.ZERO;
+    }
+}
+```
