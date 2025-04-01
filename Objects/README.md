@@ -3,4 +3,10 @@
 ## ch1 객체,설계
 - 이론이 먼저일까, 실무가 먼저일까? 
 - 소프트웨어 분야는 이론보다 실무가 앞서 있으며 실무가 더 중요하다는 의견 
-- [README.md](src%2Fmain%2Fjava%2Fdevelopx%2Flecture%2Fobjects%2Fch1%2FREADME.md)
+- 데이터와 프로세스를 하나의 덩어리로 모으는 것은 객체지향 설계로 가는 첫걸음이며 협력하는 객체들 사이의 의존성을 적절하게 조절함으로써 변경에 용이한 설계를 만드는 것이 객체지향 설계이다.
+- [자세히 보기](src%2Fmain%2Fjava%2Fdevelopx%2Flecture%2Fobjects%2Fch1%2FREADME.md)
+
+
+## ch2 객체지향 프로그래밍 
+- 객체는 상태와 행동을 함께 가지는 존재로 스스로 판단하고 행동하는 자율적인 존재 (데이터와 기능을 객체 내부에 함께 묶는 것을 캡슐화)
+- [자세히 보기](src%2Fmain%2Fjava%2Fdevelopx%2Flecture%2Fobjects%2Fch2%2FREADME.md)
